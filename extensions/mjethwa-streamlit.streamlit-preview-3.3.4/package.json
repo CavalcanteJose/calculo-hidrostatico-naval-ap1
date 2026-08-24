@@ -1,0 +1,90 @@
+{
+	"name": "streamlit-preview",
+	"displayName": "Streamlit Preview",
+	"description": "Preview Streamlit apps directly inside VS Code.",
+	"version": "3.3.4",
+	"publisher": "mjethwa-streamlit",
+	"engines": {
+		"vscode": "^1.85.0"
+	},
+	"categories": [
+		"Other"
+	],
+	"icon": "media/256.png",
+	"main": "./dist/extension.js",
+	"activationEvents": [
+		"onCommand:streamlitPreview.open",
+		"onCommand:streamlitPreview.stop",
+		"onView:streamlitPreview.sidebar"
+	],
+	"contributes": {
+		"commands": [
+			{
+				"command": "streamlitPreview.open",
+				"title": "Streamlit: Preview Current File"
+			},
+			{
+				"command": "streamlitPreview.stop",
+				"title": "Streamlit: Stop Preview"
+			}
+		],
+		"viewsContainers": {
+			"activitybar": [
+				{
+					"id": "streamlitPreviewContainer",
+					"title": "Streamlit",
+					"icon": "media/icon-128.png"
+				}
+			]
+		},
+		"views": {
+			"streamlitPreviewContainer": [
+				{
+					"id": "streamlitPreview.sidebar",
+					"name": "Streamlit Preview"
+				}
+			]
+		},
+		"configuration": {
+			"type": "object",
+			"title": "Streamlit Preview",
+			"properties": {
+				"streamlitPreview.port": {
+					"type": "number",
+					"default": 8501,
+					"description": "Default port used to run Streamlit."
+				},
+				"streamlitPreview.autoStart": {
+					"type": "boolean",
+					"default": false,
+					"description": "Automatically start preview when opening a Streamlit file."
+				}
+			}
+		}
+	},
+	"scripts": {
+		"vscode:prepublish": "npm run compile",
+		"compile": "tsc -p ./",
+		"watch": "tsc -watch -p ./"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/Meet2147/streamlit-preview.git"
+	},
+	"homepage": "https://github.com/Meet2147/streamlit-preview",
+	"bugs": {
+		"url": "https://github.com/Meet2147/streamlit-preview/issues"
+	},
+	"license": "MIT",
+	"devDependencies": {
+		"@types/node": "^20.11.17",
+		"@types/vscode": "1.85.0",
+		"typescript": "^5.4.0",
+		"vsce": "^2.15.0"
+	},
+	"__metadata": {
+		"installedTimestamp": 1787601607279,
+		"targetPlatform": "undefined",
+		"size": 3570101
+	}
+}
