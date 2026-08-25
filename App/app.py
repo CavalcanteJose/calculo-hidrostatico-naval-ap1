@@ -1,10 +1,11 @@
 """
 APLICATIVO DE CÁLCULO HIDROSTÁTICO - PROJETO INTEGRADOR AP1.1 (UEA/EST)
 Aluno: Leury Navarro Barreto | Matrícula: 2215200033
-Layout com espaçamento vertical corrigido e navegação modular fluida.
+Versão com Leitor Inteligente de Planilhas (Suporte a Cabeçalhos de Texto, Vírgulas Decimais e Formatações Diversas).
 """
 
 import io
+import re
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -28,7 +29,7 @@ st.set_page_config(
 )
 
 # ==============================================================================
-# ESTILIZAÇÃO CSS (COM PADDING SUPERIOR CORRIGIDO)
+# ESTILIZAÇÃO CSS
 # ==============================================================================
 st.markdown("""
 <style>
@@ -38,7 +39,7 @@ st.markdown("""
         color: #f8fafc;
     }
     
-    /* Espaçamento superior generoso para nunca cortar a barra superior */
+    /* Espaçamento superior generoso */
     .block-container {
         padding-top: 3.8rem !important;
         padding-bottom: 4.5rem !important;
@@ -54,7 +55,7 @@ st.markdown("""
         margin-bottom: 20px;
     }
 
-    /* Banner Superior do Aluno (Tela 2) */
+    /* Banner Superior do Aluno */
     .student-header-banner {
         background: rgba(28, 37, 65, 0.85);
         border: 1px solid #48cae4;
@@ -107,6 +108,79 @@ if "selected_module" not in st.session_state:
     st.session_state.selected_module = "📋 Tabela de Cotas"
 if "ship_name" not in st.session_state:
     st.session_state.ship_name = "Barcaça Analítica"
+
+
+# ==============================================================================
+# 0. LEITOR INTELIGENTE E ROBUSTO DE TABELAS DE COTAS (SUPORTE A CABEÇALHOS)
+# ==============================================================================
+def extract_numeric_value(val, default=0.0):
+    """Extrai número de qualquer texto (ex: 'Estação 10.5m' -> 10.5, '1,25' -> 1.25)."""
+    if pd.isna(val):
+        return default
+    if isinstance(val, (int, float)):
+        return float(val)
+    s = str(val).strip().replace(',', '.')
+    match = re.search(r"[-+]?(?:\d*\.\d+|\d+)", s)
+    if match:
+        return float(match.group(0))
+    return default
+
+
+def smart_parse_offset_table(uploaded_file):
+    """
+    Lê planilhas Excel (.xlsx, .xls) ou CSV com suporte total a cabeçalhos de texto,
+    vírgulas decimais, células vazias e formatações personalizadas.
+    """
+    file_name = uploaded_file.name.lower()
+    
+    # 1. Leitura do arquivo bruto
+    if file_name.endswith(".csv"):
+        try:
+            raw_df = pd.read_csv(uploaded_file, header=None)
+        except Exception:
+            uploaded_file.seek(0)
+            raw_df = pd.read_csv(uploaded_file, sep=";", header=None)
+    else:
+        raw_df = pd.read_excel(uploaded_file, header=None)
+
+    # Remove linhas e colunas 100% vazias
+    raw_df = raw_df.dropna(how="all").dropna(axis=1, how="all")
+    
+    if raw_df.empty:
+        raise ValueError("A planilha carregada está vazia.")
+
+    # 2. Identificar a linha de cabeçalho das Estações (X) e a coluna das Linhas d'Água (Z)
+    start_row = 1
+    start_col = 1
+    
+    # Tenta achar o cabeçalho na linha 0
+    col_labels = raw_df.iloc[0, start_col:].values
+    stations_x = []
+    for idx, col_val in enumerate(col_labels):
+        num = extract_numeric_value(col_val, default=float(idx))
+        stations_x.append(num)
+        
+    # Tenta achar os índices de linhas d'água na coluna 0
+    row_labels = raw_df.iloc[start_row:, 0].values
+    waterlines_z = []
+    for idx, row_val in enumerate(row_labels):
+        num = extract_numeric_value(row_val, default=float(idx * 0.5))
+        waterlines_z.append(num)
+
+    # 3. Extrair matriz de semi-bocas numéricas
+    data_matrix = raw_df.iloc[start_row:, start_col:].values
+    cleaned_matrix = np.zeros(data_matrix.shape, dtype=float)
+    
+    for r in range(data_matrix.shape[0]):
+        for c in range(data_matrix.shape[1]):
+            cleaned_matrix[r, c] = extract_numeric_value(data_matrix[r, c], default=0.0)
+
+    # 4. Criar DataFrame limpo e formatado
+    df_clean = pd.DataFrame(cleaned_matrix, index=waterlines_z, columns=stations_x)
+    df_clean.index.name = "Z_WL (m)"
+    df_clean.columns.name = "Estações X (m)"
+    
+    return df_clean
 
 
 # ==============================================================================
@@ -217,7 +291,8 @@ def generate_barge_data(L=20.0, B=4.0, D=2.0, nx=11, nz=6):
     zs = np.linspace(0.0, D, nz)
     mat = np.full((nz, nx), B / 2.0)
     df = pd.DataFrame(mat, index=zs, columns=xs)
-    df.index.name = "Z_WL"
+    df.index.name = "Z_WL (m)"
+    df.columns.name = "Estações X (m)"
     return df
 
 def generate_sample_ship():
@@ -232,7 +307,8 @@ def generate_sample_ship():
         [3.50, 6.80, 8.00, 8.00, 8.00, 8.00, 8.00, 8.00, 7.60, 5.80, 2.00]
     ]
     df = pd.DataFrame(data, index=zs, columns=xs)
-    df.index.name = "Z_WL"
+    df.index.name = "Z_WL (m)"
+    df.columns.name = "Estações X (m)"
     return df
 
 
@@ -358,7 +434,7 @@ if st.session_state.app_state == "home":
     with col_main_left:
         st.markdown('<div class="welcome-card">', unsafe_allow_html=True)
         st.subheader("📂 1. Seleção da Tabela de Cotas")
-        st.caption("Escolha um casco padrão para validação ou carregue um novo arquivo.")
+        st.caption("Escolha um casco padrão para validação ou carregue um novo arquivo (.xlsx / .csv).")
         
         origin_choice = st.radio(
             "Origem dos Dados:",
@@ -367,18 +443,15 @@ if st.session_state.app_state == "home":
         )
         
         if origin_choice == "📁 Fazer Upload de Tabela de Cotas (.xlsx / .csv)":
-            uploaded_file = st.file_uploader("Selecione o arquivo da Tabela de Cotas:", type=["xlsx", "csv"])
+            uploaded_file = st.file_uploader("Selecione o arquivo com ou sem cabeçalho:", type=["xlsx", "xls", "csv"])
             if uploaded_file is not None:
                 try:
-                    if uploaded_file.name.endswith(".csv"):
-                        df_loaded = pd.read_csv(uploaded_file, index_col=0)
-                    else:
-                        df_loaded = pd.read_excel(uploaded_file, index_col=0)
-                    st.session_state.df_offsets = df_loaded.astype(float).fillna(0.0)
+                    df_loaded = smart_parse_offset_table(uploaded_file)
+                    st.session_state.df_offsets = df_loaded
                     st.session_state.ship_name = uploaded_file.name.split('.')[0]
-                    st.success(f"Arquivo '{uploaded_file.name}' carregado com sucesso!")
+                    st.success(f"✅ Arquivo '{uploaded_file.name}' carregado e processado com sucesso!")
                 except Exception as e:
-                    st.error(f"Erro ao processar arquivo: {e}")
+                    st.error(f"Erro ao processar planilha: {e}")
             else:
                 st.session_state.df_offsets = generate_barge_data(20.0, 4.0, 2.0, 11, 6)
                 st.session_state.ship_name = "Barcaça Padrão"

@@ -1,9 +1,11 @@
 """
 APLICATIVO DE CÁLCULO HIDROSTÁTICO - PROJETO INTEGRADOR AP1.1 (UEA/EST)
 Aluno: Leury Navarro Barreto | Matrícula: 2215200033
+Versão com Leitor Inteligente de Planilhas (Suporte a Cabeçalhos de Texto, Vírgulas Decimais e Formatações Diversas).
 """
 
 import io
+import re
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -27,7 +29,7 @@ st.set_page_config(
 )
 
 # ==============================================================================
-# ESTILIZAÇÃO CSS (COM PADDING SUPERIOR CORRIGIDO)
+# ESTILIZAÇÃO CSS
 # ==============================================================================
 st.markdown("""
 <style>
@@ -37,7 +39,7 @@ st.markdown("""
         color: #f8fafc;
     }
     
-    /* Espaçamento superior generoso para nunca cortar a barra superior */
+    /* Espaçamento superior generoso */
     .block-container {
         padding-top: 3.8rem !important;
         padding-bottom: 4.5rem !important;
@@ -53,7 +55,7 @@ st.markdown("""
         margin-bottom: 20px;
     }
 
-    /* Banner Superior do Aluno (Tela 2) */
+    /* Banner Superior do Aluno */
     .student-header-banner {
         background: rgba(28, 37, 65, 0.85);
         border: 1px solid #48cae4;
@@ -101,11 +103,230 @@ st.markdown("""
 # INICIALIZAÇÃO DE ESTADO
 # ==============================================================================
 if "app_state" not in st.session_state:
-    st.session_state.app_state = "home"  # 'home' ou 'analysis'
+    st.session_state.app_state = "home"
 if "selected_module" not in st.session_state:
     st.session_state.selected_module = "📋 Tabela de Cotas"
 if "ship_name" not in st.session_state:
     st.session_state.ship_name = "Barcaça Analítica"
+
+
+# ==============================================================================
+# 0. PARSERS INTELIGENTES DE PLANILHAS (TABELA DE COTAS E PLANO DE LINHAS)
+# ==============================================================================
+def extract_numeric_value(val, default=0.0):
+    """Extrai número de qualquer texto (ex: '1,25 m' -> 1.25, 'Trans 8090' -> 8090)."""
+    if val is None:
+        return default
+    try:
+        if pd.isna(val):
+            return default
+    except Exception:
+        pass
+    if isinstance(val, (int, float)):
+        return float(val)
+    s = str(val).strip().replace(',', '.')
+    match = re.search(r"[-+]?(?:\d*\.\d+|\d+)", s)
+    return float(match.group(0)) if match else default
+
+
+def _is_body_plan_format(raw_df):
+    """Detecta se é Plano de Linhas com colunas Trans/Vert (não tabela de cotas padrão)."""
+    flat = raw_df.astype(str).values.flatten()
+    keywords = ["trans", "vert", "m-cl", "m-bl", "linhas", "plano", "x(m-ap)"]
+    hits = sum(1 for c in flat if any(k in str(c).lower() for k in keywords))
+    return hits >= 2
+
+
+def parse_body_plan_to_offset_table(raw_df):
+    """
+    Converte Plano de Linhas (Trans/Vert em mm por estação) em Tabela de Cotas padrão.
+
+    Formato esperado:
+      - Cabeçalho com "X(m-AP)" seguido da posição da estação em mm
+      - 3 colunas por estação: [No., Trans(mm desde CL), Vert(mm desde BL)]
+      - Valores em milímetros
+
+    Retorna DataFrame com:
+      - Índice = Linhas d'Água Z em metros
+      - Colunas = Estações X em metros
+      - Valores = Semi-bocas Y em metros
+    """
+    # 1. Localizar posições X das estações no cabeçalho
+    station_x_mm = []
+    station_x_col = {}
+
+    for ci in range(raw_df.shape[1]):
+        for ri in range(min(7, raw_df.shape[0])):
+            cell = str(raw_df.iloc[ri, ci]).strip().lower()
+            if re.match(r"x\s*\(m-ap\)", cell):
+                # Valor da estação na próxima coluna (mesma linha ou próxima)
+                for di in [1, 0]:
+                    if ci + di < raw_df.shape[1]:
+                        xv = extract_numeric_value(raw_df.iloc[ri, ci + di], default=None)
+                        if xv and xv > 0:
+                            if xv not in station_x_mm:
+                                station_x_mm.append(xv)
+                                station_x_col[xv] = ci + di
+                            break
+
+    # Fallback: busca números grandes seguidos de "Trans" na linha seguinte
+    if not station_x_mm:
+        for ci in range(raw_df.shape[1]):
+            for ri in range(min(5, raw_df.shape[0])):
+                xv = extract_numeric_value(raw_df.iloc[ri, ci], default=0)
+                if 50 < xv < 50000:
+                    # Verifica se coluna seguinte contém "Trans"
+                    if ci + 1 < raw_df.shape[1]:
+                        next_col_text = " ".join(
+                            str(raw_df.iloc[r, ci + 1]).lower()
+                            for r in range(min(6, raw_df.shape[0]))
+                        )
+                        if "trans" in next_col_text and xv not in station_x_mm:
+                            station_x_mm.append(xv)
+                            station_x_col[xv] = ci
+
+    if not station_x_mm:
+        raise ValueError(
+            "Não foi possível identificar as estações X.\n"
+            "Certifique-se que a planilha contém cabeçalhos 'X(m-AP)' com os valores das estações."
+        )
+
+    # 2. Encontrar linha inicial dos dados numéricos
+    data_start_row = 4  # padrão: linha 4 (após título + 3 linhas de cabeçalho)
+    for ri in range(min(10, raw_df.shape[0])):
+        v = str(raw_df.iloc[ri, 0]).strip()
+        if v in ('1', '1.0', '1,0'):
+            data_start_row = ri
+            break
+
+    # 3. Para cada estação, localizar colunas Trans e Vert e extrair pontos
+    station_points = {}
+
+    for x_mm in station_x_mm:
+        x_col = station_x_col[x_mm]
+        trans_col = vert_col = None
+
+        # Procura "Trans" e "Vert" nas linhas de cabeçalho próximas a x_col
+        search_cols = range(max(0, x_col - 1), min(raw_df.shape[1], x_col + 4))
+        for ci in search_cols:
+            col_text = " ".join(
+                str(raw_df.iloc[ri, ci]).lower()
+                for ri in range(min(7, raw_df.shape[0]))
+            )
+            if "trans" in col_text and trans_col is None:
+                trans_col = ci
+            if "vert" in col_text and vert_col is None:
+                vert_col = ci
+
+        # Fallback: Trans = x_col+1, Vert = x_col+2
+        if trans_col is None:
+            trans_col = x_col + 1 if x_col + 1 < raw_df.shape[1] else None
+        if vert_col is None:
+            vert_col = x_col + 2 if x_col + 2 < raw_df.shape[1] else None
+
+        if trans_col is None or vert_col is None:
+            continue
+
+        points = []
+        for ri in range(data_start_row, raw_df.shape[0]):
+            t = extract_numeric_value(raw_df.iloc[ri, trans_col], default=None)
+            v = extract_numeric_value(raw_df.iloc[ri, vert_col], default=None)
+            if t is not None and v is not None and t > 0 and v >= 0:
+                points.append((t / 1000.0, v / 1000.0))  # mm → m
+
+        if points:
+            x_m = x_mm / 1000.0
+            station_points[x_m] = sorted(points, key=lambda p: p[1])
+
+    if not station_points:
+        raise ValueError(
+            "Nenhum ponto (Trans, Vert) válido encontrado.\n"
+            "Verifique se os dados numéricos estão nas colunas corretas."
+        )
+
+    # 4. Criar grade de Linhas d'Água e interpolar semi-bocas
+    all_z = [v for pts in station_points.values() for (_, v) in pts]
+    z_grid = np.linspace(min(all_z), max(all_z), 12)
+    x_sorted = sorted(station_points.keys())
+    matrix = np.zeros((len(z_grid), len(x_sorted)))
+
+    for j, x_m in enumerate(x_sorted):
+        pts = station_points[x_m]
+        z_arr = np.array([p[1] for p in pts])
+        y_arr = np.array([p[0] for p in pts])
+        # Ordenar e remover Z duplicados
+        sidx = np.argsort(z_arr)
+        z_arr, y_arr = z_arr[sidx], y_arr[sidx]
+        _, uidx = np.unique(z_arr, return_index=True)
+        z_arr, y_arr = z_arr[uidx], y_arr[uidx]
+        if len(z_arr) >= 2:
+            f = interp1d(z_arr, y_arr, kind='linear',
+                         fill_value=(y_arr[0], y_arr[-1]), bounds_error=False)
+            matrix[:, j] = np.maximum(0, f(z_grid))
+
+    df_result = pd.DataFrame(
+        np.round(matrix, 4),
+        index=np.round(z_grid, 4),
+        columns=np.round(x_sorted, 4)
+    )
+    df_result.index.name = "Z_WL (m)"
+    df_result.columns.name = "Estações X (m)"
+    return df_result
+
+
+def smart_parse_offset_table(uploaded_file):
+    """
+    Parser universal: detecta automaticamente o formato da planilha.
+      - Formato A: Tabela de Cotas padrão (Z × X com semi-bocas Y)
+      - Formato B: Plano de Linhas (Trans/Vert em mm por estação)
+    """
+    file_name = uploaded_file.name.lower()
+
+    # Leitura bruta do arquivo
+    if file_name.endswith(".csv"):
+        try:
+            raw_df = pd.read_csv(uploaded_file, header=None)
+        except Exception:
+            uploaded_file.seek(0)
+            raw_df = pd.read_csv(uploaded_file, sep=";", header=None)
+    else:
+        raw_df = pd.read_excel(uploaded_file, header=None)
+
+    raw_df = raw_df.dropna(how="all").dropna(axis=1, how="all")
+
+    if raw_df.empty:
+        raise ValueError("A planilha carregada está vazia.")
+
+    # Detecção automática de formato
+    if _is_body_plan_format(raw_df):
+        df_result = parse_body_plan_to_offset_table(raw_df)
+        return df_result
+
+    # --- Formato A: Tabela de Cotas padrão ---
+    start_row, start_col = 1, 1
+
+    col_labels = raw_df.iloc[0, start_col:].values
+    stations_x = [extract_numeric_value(v, float(i)) for i, v in enumerate(col_labels)]
+
+    row_labels = raw_df.iloc[start_row:, 0].values
+    waterlines_z = [extract_numeric_value(v, float(i) * 0.5) for i, v in enumerate(row_labels)]
+
+    data_matrix = raw_df.iloc[start_row:, start_col:].values
+    cleaned = np.zeros(data_matrix.shape, dtype=float)
+    for r in range(data_matrix.shape[0]):
+        for c in range(data_matrix.shape[1]):
+            cleaned[r, c] = extract_numeric_value(data_matrix[r, c], 0.0)
+
+    # Conversão automática mm → m quando valores são muito grandes
+    if np.nanmax(cleaned) > 100:
+        cleaned = cleaned / 1000.0
+        stations_x = [x / 1000.0 if x > 100 else x for x in stations_x]
+        waterlines_z = [z / 1000.0 if z > 50 else z for z in waterlines_z]
+
+    df_clean = pd.DataFrame(cleaned, index=waterlines_z, columns=stations_x)
+    df_clean.index.name = "Z_WL (m)"
+    df_clean.columns.name = "Estações X (m)"
+    return df_clean
 
 
 # ==============================================================================
@@ -216,7 +437,8 @@ def generate_barge_data(L=20.0, B=4.0, D=2.0, nx=11, nz=6):
     zs = np.linspace(0.0, D, nz)
     mat = np.full((nz, nx), B / 2.0)
     df = pd.DataFrame(mat, index=zs, columns=xs)
-    df.index.name = "Z_WL"
+    df.index.name = "Z_WL (m)"
+    df.columns.name = "Estações X (m)"
     return df
 
 def generate_sample_ship():
@@ -231,7 +453,8 @@ def generate_sample_ship():
         [3.50, 6.80, 8.00, 8.00, 8.00, 8.00, 8.00, 8.00, 7.60, 5.80, 2.00]
     ]
     df = pd.DataFrame(data, index=zs, columns=xs)
-    df.index.name = "Z_WL"
+    df.index.name = "Z_WL (m)"
+    df.columns.name = "Estações X (m)"
     return df
 
 
@@ -357,7 +580,7 @@ if st.session_state.app_state == "home":
     with col_main_left:
         st.markdown('<div class="welcome-card">', unsafe_allow_html=True)
         st.subheader("📂 1. Seleção da Tabela de Cotas")
-        st.caption("Escolha um casco padrão para validação ou carregue um novo arquivo.")
+        st.caption("Escolha um casco padrão para validação ou carregue um novo arquivo (.xlsx / .csv).")
         
         origin_choice = st.radio(
             "Origem dos Dados:",
@@ -366,18 +589,15 @@ if st.session_state.app_state == "home":
         )
         
         if origin_choice == "📁 Fazer Upload de Tabela de Cotas (.xlsx / .csv)":
-            uploaded_file = st.file_uploader("Selecione o arquivo da Tabela de Cotas:", type=["xlsx", "csv"])
+            uploaded_file = st.file_uploader("Selecione o arquivo com ou sem cabeçalho:", type=["xlsx", "xls", "csv"])
             if uploaded_file is not None:
                 try:
-                    if uploaded_file.name.endswith(".csv"):
-                        df_loaded = pd.read_csv(uploaded_file, index_col=0)
-                    else:
-                        df_loaded = pd.read_excel(uploaded_file, index_col=0)
-                    st.session_state.df_offsets = df_loaded.astype(float).fillna(0.0)
+                    df_loaded = smart_parse_offset_table(uploaded_file)
+                    st.session_state.df_offsets = df_loaded
                     st.session_state.ship_name = uploaded_file.name.split('.')[0]
-                    st.success(f"Arquivo '{uploaded_file.name}' carregado com sucesso!")
+                    st.success(f"✅ Arquivo '{uploaded_file.name}' carregado e processado com sucesso!")
                 except Exception as e:
-                    st.error(f"Erro ao processar arquivo: {e}")
+                    st.error(f"Erro ao processar planilha: {e}")
             else:
                 st.session_state.df_offsets = generate_barge_data(20.0, 4.0, 2.0, 11, 6)
                 st.session_state.ship_name = "Barcaça Padrão"
@@ -396,9 +616,11 @@ if st.session_state.app_state == "home":
         st.caption("Verifique as dimensões principais e a densidade da água.")
         
         df_curr = st.session_state.get("df_offsets", generate_barge_data())
-        calc_lbp = float(df_curr.columns[-1]) - float(df_curr.columns[0])
-        calc_beam = float(2.0 * df_curr.values.max())
-        calc_depth = float(df_curr.index[-1])
+        # Clamp valores para garantir que estejam acima dos mínimos dos widgets
+        calc_lbp = max(1.0, float(df_curr.columns[-1]) - float(df_curr.columns[0]))
+        calc_beam = max(0.5, float(2.0 * df_curr.values.max()))
+        calc_depth = max(0.5, float(df_curr.index[-1]))
+        calc_td = max(0.1, float(calc_depth * 0.7))
         
         col_p1, col_p2 = st.columns(2)
         st.session_state.lbp = col_p1.number_input("LBP (m)", value=calc_lbp, min_value=1.0, step=1.0)
@@ -406,7 +628,7 @@ if st.session_state.app_state == "home":
         
         col_p3, col_p4 = st.columns(2)
         st.session_state.depth = col_p3.number_input("Pontal D (m)", value=calc_depth, min_value=0.5, step=0.5)
-        st.session_state.design_draft = col_p4.number_input("Calado Proj. Td (m)", value=float(calc_depth * 0.7), min_value=0.1, step=0.1)
+        st.session_state.design_draft = col_p4.number_input("Calado Proj. Td (m)", value=calc_td, min_value=0.1, step=0.1)
         
         st.session_state.density = st.number_input("Densidade da Água ρ (t/m³)", value=1.025, min_value=0.5, max_value=1.5, step=0.001, format="%.3f")
         
