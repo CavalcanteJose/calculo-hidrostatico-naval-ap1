@@ -764,25 +764,28 @@ if st.session_state.app_state == "home":
             df_curr = generate_real_ship()
             st.session_state.df_offsets = df_curr
 
-        def _get_num(val, default=1.0):
-            try:
-                v = extract_numeric_value(val, default)
-                return float(v) if v is not None else float(default)
-            except Exception:
-                return float(default)
+        try:
+            cols = [float(extract_numeric_value(c, 0.0)) for c in list(df_curr.columns)]
+            col_first = cols[0] if len(cols) > 0 else 0.0
+            col_last = cols[-1] if len(cols) > 0 else 20.0
+            calc_lbp = max(1.0, float(col_last - col_first))
+            if calc_lbp <= 1.0:
+                calc_lbp = max(1.0, float(col_last))
+        except Exception:
+            calc_lbp = 7.20
 
-        # Determina dimensões principais de forma segura
-        col_first = _get_num(df_curr.columns[0], 0.0)
-        col_last = _get_num(df_curr.columns[-1], 20.0)
-        calc_lbp = max(1.0, float(col_last - col_first))
-        if calc_lbp <= 1.0:
-            calc_lbp = max(1.0, float(col_last))
-            
-        max_half_b = float(np.nanmax(df_curr.values)) if df_curr.values.size > 0 else 2.0
-        calc_beam = max(0.5, float(2.0 * max_half_b))
-        
-        idx_last = _get_num(df_curr.index[-1], 2.0)
-        calc_depth = max(0.5, float(idx_last))
+        try:
+            max_half_b = float(np.nanmax(df_curr.values)) if df_curr.values.size > 0 else 1.02
+            calc_beam = max(0.5, float(2.0 * max_half_b))
+        except Exception:
+            calc_beam = 2.04
+
+        try:
+            idxs = [float(extract_numeric_value(i, 0.0)) for i in list(df_curr.index)]
+            calc_depth = max(0.5, float(idxs[-1])) if len(idxs) > 0 else 1.80
+        except Exception:
+            calc_depth = 1.80
+
         calc_td = max(0.1, float(calc_depth * 0.65))
         
         col_p1, col_p2 = st.columns(2)
