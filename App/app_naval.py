@@ -500,26 +500,26 @@ def generate_real_ship():
     data = [
         # WL00 (z = 0.00m - Linha de Base / Quilha)
         [0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000],
-        # WL01 (z = 0.18m)
-        [0.300, 0.350, 0.380, 0.400, 0.410, 0.400, 0.360, 0.280, 0.180, 0.080, 0.000],
+        # WL01 (z = 0.18m) - Entra apenas na região central do fundo em V
+        [0.000, 0.000, 0.150, 0.280, 0.350, 0.380, 0.320, 0.180, 0.000, 0.000, 0.000],
         # WL02 (z = 0.36m)
-        [0.520, 0.580, 0.630, 0.660, 0.670, 0.660, 0.620, 0.520, 0.380, 0.190, 0.000],
+        [0.000, 0.220, 0.420, 0.550, 0.620, 0.640, 0.580, 0.440, 0.220, 0.000, 0.000],
         # WL03 (z = 0.54m)
-        [0.680, 0.740, 0.790, 0.820, 0.830, 0.820, 0.780, 0.700, 0.550, 0.300, 0.000],
+        [0.250, 0.480, 0.640, 0.740, 0.800, 0.820, 0.770, 0.650, 0.450, 0.180, 0.000],
         # WL04 (z = 0.72m)
-        [0.780, 0.840, 0.880, 0.910, 0.920, 0.910, 0.880, 0.810, 0.670, 0.400, 0.000],
+        [0.480, 0.660, 0.780, 0.860, 0.910, 0.920, 0.880, 0.780, 0.600, 0.340, 0.000],
         # WL05 (z = 0.90m)
-        [0.840, 0.900, 0.940, 0.960, 0.970, 0.960, 0.940, 0.880, 0.760, 0.490, 0.000],
+        [0.640, 0.780, 0.880, 0.940, 0.970, 0.980, 0.950, 0.870, 0.720, 0.470, 0.000],
         # WL06 (z = 1.08m)
-        [0.880, 0.930, 0.970, 0.990, 1.000, 1.000, 0.980, 0.930, 0.830, 0.570, 0.000],
+        [0.740, 0.860, 0.940, 0.980, 1.000, 1.010, 0.990, 0.930, 0.810, 0.580, 0.000],
         # WL07 (z = 1.26m)
-        [0.900, 0.950, 0.990, 1.010, 1.018, 1.018, 1.005, 0.965, 0.885, 0.640, 0.000],
+        [0.800, 0.910, 0.970, 1.000, 1.015, 1.020, 1.010, 0.960, 0.870, 0.660, 0.000],
         # WL08 (z = 1.44m)
-        [0.920, 0.960, 1.000, 1.015, 1.020, 1.020, 1.015, 0.985, 0.925, 0.700, 0.000],
+        [0.840, 0.940, 0.990, 1.010, 1.020, 1.020, 1.018, 0.980, 0.910, 0.720, 0.000],
         # WL09 (z = 1.62m)
-        [0.930, 0.970, 1.005, 1.020, 1.020, 1.020, 1.020, 0.995, 0.950, 0.750, 0.000],
+        [0.870, 0.960, 1.000, 1.015, 1.020, 1.020, 1.020, 0.990, 0.930, 0.760, 0.000],
         # WL10 (z = 1.80m - Borda Livre / Convés)
-        [0.940, 0.975, 1.010, 1.020, 1.020, 1.020, 1.020, 1.000, 0.965, 0.790, 0.000],
+        [0.890, 0.970, 1.005, 1.020, 1.020, 1.020, 1.020, 1.000, 0.945, 0.790, 0.000],
     ]
 
     df = pd.DataFrame(data, index=zs, columns=xs)
@@ -942,10 +942,10 @@ else:
             # 1. Linha de Perfil de Quilha & Roda de Proa (Perfil de Centro Y = 0)
             keel_z = []
             for xv in xs_dense:
-                # Na proa (ST 07 a ST 10), a quilha sobe suavemente até o convés
-                if xv >= hull.stations_x[7]:
-                    frac = (xv - hull.stations_x[7]) / (hull.stations_x[-1] - hull.stations_x[7])
-                    z_stem = hull.D * (frac ** 2.2)
+                # Quilha plana na popa/meio e curva suave de roda de proa na vante (ST 06 a ST 10)
+                if xv >= hull.stations_x[5]:
+                    frac = (xv - hull.stations_x[5]) / (hull.stations_x[-1] - hull.stations_x[5])
+                    z_stem = hull.D * (frac ** 1.85)
                     keel_z.append(float(z_stem))
                 else:
                     keel_z.append(0.0)
@@ -956,46 +956,61 @@ else:
                 line=dict(color="#ffffff", width=2.8)
             ))
 
-            # 2. Linha do Convés / Borda Livre (Sheer Line)
-            deck_z = np.full_like(xs_dense, hull.D)
+            # 2. Linha do Convés / Borda Livre (Sheer Line do PDF)
+            # Razoável tosa de proa elevando suavemente de 1.50m (popa) / 1.45m (meia-nau) até 1.80m (proa)
+            deck_z = []
+            mid_x = hull.stations_x[5]
+            for xv in xs_dense:
+                if xv <= mid_x:
+                    dz = 1.45 + 0.10 * ((mid_x - xv) / mid_x) ** 2
+                else:
+                    dz = 1.45 + 0.35 * ((xv - mid_x) / (hull.stations_x[-1] - mid_x)) ** 2
+                deck_z.append(min(float(hull.D), float(dz)))
+                
             fig.add_trace(go.Scatter(
                 x=xs_dense, y=deck_z, mode='lines',
-                name=f"Linha de Convés / Borda Livre (z={hull.D:.2f}m)",
+                name=f"Linha de Convés / Borda Livre (Sheer Line)",
                 line=dict(color="#fca311", width=2.6)
             ))
 
             # 3. Cortes Longitudinais / Linhas do Alto (Buttocks A, B, C a distâncias Y constantes)
-            cuts_y = [hull.B * 0.1667, hull.B * 0.3333, hull.B * 0.50]
-            cut_names = ["Corte A (Y = 1/6 Boca)", "Corte B (Y = 1/3 Boca)", "Corte C (Y = 1/2 Boca / Borda)"]
-            cut_colors = ["#a855f7", "#ec4899", "#38bdf8"]
+            # Cortes oficiais: 340mm (Corte A), 680mm (Corte B), 1020mm (Corte C)
+            cuts_y = [hull.B * 0.1667, hull.B * 0.3333, hull.B * 0.490]
+            cut_names = ["Corte A (Y = 340 mm)", "Corte B (Y = 680 mm)", "Corte C (Y = 1000 mm)"]
+            cut_colors = ["#c084fc", "#f43f5e", "#38bdf8"]
+            
+            z_eval_grid = np.linspace(hull.waterlines_z[0], hull.D, 120)
             
             for y_target, c_name, c_color in zip(cuts_y, cut_names, cut_colors):
-                x_pts_buttock, z_pts_buttock = [], []
+                x_buttock_valid, z_buttock_valid = [], []
                 
-                for j, st_x in enumerate(hull.stations_x):
-                    # Avalia perfil vertical de semi-boca nesta estação
-                    z_eval = np.linspace(hull.waterlines_z[0], hull.D, 80)
-                    y_eval = np.array([hull.get_y(j, zi) for zi in z_eval])
+                for xv in xs_dense:
+                    # Avalia y(xv, z) no grid vertical contínuo
+                    y_eval = np.array([hull.get_y_continuous(xv, zi) for zi in z_eval_grid])
                     
                     if np.max(y_eval) >= y_target:
-                        # Encontra cota Z onde a semi-boca atinge y_target
-                        valid_z = z_eval[y_eval >= y_target]
-                        x_pts_buttock.append(st_x)
-                        z_pts_buttock.append(float(valid_z[0]))
+                        # Encontra cota Z onde a semi-boca atinge exatamente y_target
+                        # Interpolação inversa Z(y)
+                        y_valid_idx = np.where(y_eval >= y_target)[0]
+                        first_idx = y_valid_idx[0]
+                        if first_idx > 0:
+                            y0, y1 = y_eval[first_idx - 1], y_eval[first_idx]
+                            z0, z1 = z_eval_grid[first_idx - 1], z_eval_grid[first_idx]
+                            if y1 > y0:
+                                z_root = z0 + (y_target - y0) * (z1 - z0) / (y1 - y0)
+                            else:
+                                z_root = z1
+                        else:
+                            z_root = z_eval_grid[0]
+                            
+                        x_buttock_valid.append(float(xv))
+                        z_buttock_valid.append(float(z_root))
 
-                if len(x_pts_buttock) >= 3:
-                    # Interpolação PCHIP contínua e suave para a Linha do Alto
-                    x_buttock_dense = np.linspace(x_pts_buttock[0], x_pts_buttock[-1], 80)
-                    try:
-                        pchip_b = PchipInterpolator(x_pts_buttock, z_pts_buttock)
-                        z_buttock_dense = pchip_b(x_buttock_dense)
-                    except Exception:
-                        z_buttock_dense = np.interp(x_buttock_dense, x_pts_buttock, z_pts_buttock)
-
+                if len(x_buttock_valid) >= 4:
                     fig.add_trace(go.Scatter(
-                        x=x_buttock_dense, y=z_buttock_dense, mode='lines',
-                        name=f"Linha do Alto {c_name} [y={y_target:.2f}m]",
-                        line=dict(color=c_color, width=2.2)
+                        x=x_buttock_valid, y=z_buttock_valid, mode='lines',
+                        name=f"Linha do Alto {c_name}",
+                        line=dict(color=c_color, width=2.4)
                     ))
 
             # Calado Ativo de Análise
@@ -1005,7 +1020,7 @@ else:
             )
 
             fig.update_layout(
-                title="Plano de Linhas do Alto / Perfil (Sheer Plan - Vista Lateral)",
+                title="Plano de Linhas do Alto / Perfil (Sheer Plan - Vista Lateral Oficial)",
                 xaxis_title="Comprimento Longitudinal X (m) [ST 00 (Popa) → ST 10 (Proa)]",
                 yaxis_title="Cota Vertical Z (m) [Linha de Base BL = 0]",
                 template="plotly_dark", height=500, margin=dict(l=25, r=25, t=45, b=25),
