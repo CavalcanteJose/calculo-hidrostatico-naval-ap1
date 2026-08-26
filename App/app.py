@@ -431,6 +431,27 @@ class Hull:
         z = min(z, self.waterlines_z[-1])
         return max(0.0, float(self._station_interps[station_idx](z)))
 
+    def get_y_continuous(self, x, z):
+        """Retorna a semi-boca Y(x, z) interpolada suavemente de forma contínua em X e Z."""
+        if z < self.waterlines_z[0]:
+            return 0.0
+        z = min(z, self.waterlines_z[-1])
+        x = np.clip(x, self.stations_x[0], self.stations_x[-1])
+        
+        # 1. Avalia Y(z) em cada uma das estações discretas
+        y_at_stations = np.array([float(self._station_interps[j](z)) for j in range(len(self.stations_x))])
+        y_at_stations = np.maximum(0.0, y_at_stations)
+        
+        # 2. Interpola longitudinalmente ao longo de X com PCHIP suave
+        if len(self.stations_x) >= 3 and len(np.unique(y_at_stations)) > 1:
+            try:
+                long_interp = PchipInterpolator(self.stations_x, y_at_stations)
+                return max(0.0, float(long_interp(x)))
+            except Exception:
+                return max(0.0, float(np.interp(x, self.stations_x, y_at_stations)))
+        else:
+            return max(0.0, float(np.interp(x, self.stations_x, y_at_stations)))
+
 
 def generate_barge_data(L=20.0, B=4.0, D=2.0, nx=11, nz=6):
     xs = np.linspace(0.0, L, nx)
@@ -859,24 +880,19 @@ else:
 
         def get_waterlines_figure():
             fig = go.Figure()
-            xs_dense = np.linspace(hull.stations_x[0], hull.stations_x[-1], 60)
+            xs_dense = np.linspace(hull.stations_x[0], hull.stations_x[-1], 100)
             
             # Estações como linhas verticais
             for j, st_x in enumerate(hull.stations_x):
                 fig.add_vline(x=st_x, line_dash="dot", line_color="rgba(148, 163, 184, 0.25)", line_width=1)
 
-            # Linhas d'água existentes
+            # Linhas d'água existentes interpoladas de forma contínua e suave
             for wz in hull.waterlines_z:
-                ys_wz = []
-                for x_val in xs_dense:
-                    # Encontra índice da estação mais próxima e interpola
-                    st_idx = np.searchsorted(hull.stations_x, x_val, side='right') - 1
-                    st_idx = max(0, min(st_idx, len(hull.stations_x) - 1))
-                    ys_wz.append(hull.get_y(st_idx, wz))
+                ys_wz = [hull.get_y_continuous(xv, wz) for xv in xs_dense]
                     
                 fig.add_trace(go.Scatter(
                     x=xs_dense, y=ys_wz, mode='lines',
-                    name=f"WL z={wz:.2f}m", line=dict(width=1.4)
+                    name=f"WL z={wz:.2f}m", line=dict(width=1.5)
                 ))
                 fig.add_trace(go.Scatter(
                     x=xs_dense, y=[-v for v in ys_wz], mode='lines',
@@ -884,11 +900,11 @@ else:
                 ))
 
             # Linha d'água ativa em destaque
-            ys_active = [hull.get_y(max(0, min(np.searchsorted(hull.stations_x, xv, side='right')-1, len(hull.stations_x)-1)), viz_draft) for xv in xs_dense]
+            ys_active = [hull.get_y_continuous(xv, viz_draft) for xv in xs_dense]
             fig.add_trace(go.Scatter(
                 x=xs_dense, y=ys_active, mode='lines',
                 name=f"★ WL Ativa T={viz_draft:.2f}m",
-                line=dict(color="#00f5d4", width=3.0)
+                line=dict(color="#00f5d4", width=3.2)
             ))
             fig.add_trace(go.Scatter(
                 x=xs_dense, y=[-v for v in ys_active], mode='lines',
@@ -919,17 +935,15 @@ else:
                 fig.add_hline(y=wz, line_dash="dot", line_color="rgba(148, 163, 184, 0.25)", line_width=1)
 
             # Cortes Longitudinais / Linhas do Alto (Buttocks A, B, C a distâncias Y constantes)
-            xs_dense = np.linspace(hull.stations_x[0], hull.stations_x[-1], 60)
+            xs_dense = np.linspace(hull.stations_x[0], hull.stations_x[-1], 80)
             cuts_y = [hull.B * 0.15, hull.B * 0.30, hull.B * 0.45]
             cut_names = ["Corte A (Y=15% B)", "Corte B (Y=30% B)", "Corte C (Y=45% B)"]
             
             for y_target, c_name in zip(cuts_y, cut_names):
                 z_buttock = []
                 for xv in xs_dense:
-                    st_idx = max(0, min(np.searchsorted(hull.stations_x, xv, side='right') - 1, len(hull.stations_x) - 1))
-                    # Encontra cota Z onde a semi-boca atinge y_target
-                    z_eval = np.linspace(hull.waterlines_z[0], hull.D, 50)
-                    y_eval = np.array([hull.get_y(st_idx, zi) for zi in z_eval])
+                    z_eval = np.linspace(hull.waterlines_z[0], hull.D, 60)
+                    y_eval = np.array([hull.get_y_continuous(xv, zi) for zi in z_eval])
                     if np.max(y_eval) >= y_target:
                         valid_z = z_eval[y_eval >= y_target]
                         z_buttock.append(float(valid_z[0]) if len(valid_z) > 0 else np.nan)
@@ -984,18 +998,20 @@ else:
                 st.plotly_chart(get_sheer_figure(), use_container_width=True)
 
         with col_v2:
-            st.markdown("#### Casco Tridimensional (3D Mesh Interativo)")
-            x_mesh, y_mesh, z_mesh = [], [], []
-            for z_val in hull.waterlines_z:
-                xs_d = np.linspace(hull.stations_x[0], hull.stations_x[-1], 30)
-                ys_d = [hull.get_y(min(max(0, np.searchsorted(hull.stations_x, x_val, side='right')-1), len(hull.stations_x)-1), z_val) for x_val in xs_d]
-                x_mesh.append(xs_d)
-                y_mesh.append(ys_d)
-                z_mesh.append(np.full_like(xs_d, z_val))
+            st.markdown("#### Casco Tridimensional (3D Mesh Suave)")
+            xs_3d = np.linspace(hull.stations_x[0], hull.stations_x[-1], 40)
+            zs_3d = np.linspace(hull.waterlines_z[0], hull.D, 25)
+            
+            x_mesh, z_mesh = np.meshgrid(xs_3d, zs_3d)
+            y_mesh = np.zeros_like(x_mesh)
+            
+            for r in range(x_mesh.shape[0]):
+                for c in range(x_mesh.shape[1]):
+                    y_mesh[r, c] = hull.get_y_continuous(x_mesh[r, c], z_mesh[r, c])
                 
             fig_3d = go.Figure()
             fig_3d.add_trace(go.Surface(x=x_mesh, y=y_mesh, z=z_mesh, colorscale='Viridis', opacity=0.88, showscale=False, name="Boreste (+Y)"))
-            fig_3d.add_trace(go.Surface(x=x_mesh, y=[[-v for v in row] for row in y_mesh], z=z_mesh, colorscale='Viridis', opacity=0.88, showscale=False, name="Bombordo (-Y)"))
+            fig_3d.add_trace(go.Surface(x=x_mesh, y=-y_mesh, z=z_mesh, colorscale='Viridis', opacity=0.88, showscale=False, name="Bombordo (-Y)"))
             
             # Plano da Água Flutuante
             xp, yp = np.meshgrid(np.linspace(hull.stations_x[0], hull.stations_x[-1], 8), np.linspace(-hull.B/2, hull.B/2, 8))
