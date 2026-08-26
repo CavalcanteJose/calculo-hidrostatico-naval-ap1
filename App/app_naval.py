@@ -458,6 +458,55 @@ def generate_sample_ship():
     return df
 
 
+def generate_real_ship():
+    """
+    Navio Real — Tabela de Cotas com 11 Balizas (0–10) e 11 Linhas d'Água (0–10).
+    Dados extraídos da planilha original em milímetros e convertidos para metros.
+
+    Balizas (X) em mm: 0, 911, 1822, 2733, 3644, 4555, 5466, 6377, 7288, 8199, 9110
+    Linhas d'Água (Z) em mm: 0, 106, 212, 318, 424, 530, 636, 742, 848, 954, 1060
+    Valores da matriz = Meias-bocas em mm → convertidas para metros (÷ 1000)
+    """
+    # Estações X em metros
+    xs = np.array([0.000, 0.911, 1.822, 2.733, 3.644, 4.555, 5.466, 6.377, 7.288, 8.199, 9.110])
+    # Linhas d'Água Z em metros
+    zs = np.array([0.000, 0.106, 0.212, 0.318, 0.424, 0.530, 0.636, 0.742, 0.848, 0.954, 1.060])
+
+    # Meias-bocas em metros (originalmente em mm, dividido por 1000)
+    # Colunas: B0 | B1 | B2 | B3 | B4 | B5 | B6 | B7 | B8 | B9 | B10
+    data = [
+        # WL0  (z = 0.000 m)
+        [0.000, 0.109, 0.0298, 0.0653, 0.0764, 0.00132, 0.000, 0.336, 0.164, 0.0382, 0.000],
+        # WL1  (z = 0.106 m)
+        [0.000, 0.109, 0.226,  0.464,  0.592,  0.598,   0.509, 0.630, 0.354, 0.354,  0.000],
+        # WL2  (z = 0.212 m)
+        [0.000, 0.250, 0.523,  0.807,  0.967,  0.944,   0.827, 0.937, 0.659, 0.330,  0.000],
+        # WL3  (z = 0.318 m)
+        [0.000, 0.525, 0.842,  1.070,  1.180,  1.160,   1.090, 0.824, 0.520, 0.238,  0.000],
+        # WL4  (z = 0.424 m)
+        [0.000, 0.399, 0.725,  0.988,  1.120,  1.090,   0.993, 1.000, 0.760, 0.418,  0.000],
+        # WL5  (z = 0.530 m)
+        [0.000, 0.607, 0.908,  1.110,  1.200,  1.190,   1.140, 1.040, 0.822, 0.496,  0.000],
+        # WL6  (z = 0.636 m)
+        [0.000, 0.663, 0.952,  1.130,  1.200,  1.220,   1.160, 1.060, 0.866, 0.558,  0.000],
+        # WL7  (z = 0.742 m)
+        [0.000, 0.708, 0.984,  1.140,  1.200,  1.230,   1.160, 1.080, 0.901, 0.613,  0.000],
+        # WL8  (z = 0.848 m)
+        [0.000, 0.747, 1.010,  1.140,  1.200,  1.220,   1.170, 1.100, 0.930, 0.661,  0.000],
+        # WL9  (z = 0.954 m)
+        [0.000, 0.781, 1.020,  1.150,  1.200,  1.220,   1.180, 1.110, 0.957, 0.697,  0.000],
+        # WL10 (z = 1.060 m) — B7-B10 estimados por extrapolação linear da tendência
+        [0.000, 0.811, 1.040,  1.150,  1.190,  1.210,   1.180, 1.118, 0.982, 0.731,  0.000],
+    ]
+
+    df = pd.DataFrame(data, index=zs, columns=xs)
+    df.index.name = "Z_WL (m)"
+    df.columns.name = "Estações X (m)"
+    return df
+
+
+
+
 # ==============================================================================
 # 3. MOTOR HIDROSTÁTICO (Itens 10 a 19 do Edital)
 # ==============================================================================
@@ -584,7 +633,12 @@ if st.session_state.app_state == "home":
         
         origin_choice = st.radio(
             "Origem dos Dados:",
-            ["🧱 Barcaça Paralelepipédica (Validação Analítica)", "🚢 Navio Mercante 100m (Exemplo Realista)", "📁 Fazer Upload de Tabela de Cotas (.xlsx / .csv)"],
+            [
+                "🧱 Barcaça Paralelepipédica (Validação Analítica)",
+                "🚢 Navio Mercante 100m (Exemplo Realista)",
+                "⛵ Navio Real — Tabela de Cotas (11 Balizas × 11 WL)",
+                "📁 Fazer Upload de Tabela de Cotas (.xlsx / .csv)"
+            ],
             index=0
         )
         
@@ -604,9 +658,13 @@ if st.session_state.app_state == "home":
         elif origin_choice == "🚢 Navio Mercante 100m (Exemplo Realista)":
             st.session_state.df_offsets = generate_sample_ship()
             st.session_state.ship_name = "Navio Mercante 100m"
+        elif origin_choice == "⛵ Navio Real — Tabela de Cotas (11 Balizas × 11 WL)":
+            st.session_state.df_offsets = generate_real_ship()
+            st.session_state.ship_name = "Navio Real (9.11m × 2.40m × 1.06m)"
         else:
             st.session_state.df_offsets = generate_barge_data(20.0, 4.0, 2.0, 11, 6)
             st.session_state.ship_name = "Barcaça Analítica"
+
             
         st.markdown('</div>', unsafe_allow_html=True)
         
