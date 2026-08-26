@@ -468,6 +468,16 @@ def generate_sample_ship():
     data = [
         [0.00, 0.40, 1.20, 2.50, 4.00, 4.50, 4.00, 2.50, 1.20, 0.40, 0.00],
         [0.50, 2.10, 4.60, 6.80, 7.80, 8.00, 7.80, 6.80, 4.50, 2.00, 0.20],
+        [1.20, 3.80, 6.40, 7.60, 8.00, 8.00, 8.00, 7.50, 5.80, 3.20, 0.50],
+        [2.00, 5.00, 7.20, 7.90, 8.00, 8.00, 8.00, 7.80, 6.60, 4.20, 0.90],
+        [2.80, 6.00, 7.70, 8.00, 8.00, 8.00, 8.00, 8.00, 7.20, 5.00, 1.40],
+        [3.50, 6.80, 8.00, 8.00, 8.00, 8.00, 8.00, 8.00, 7.60, 5.80, 2.00]
+    ]
+    df = pd.DataFrame(data, index=zs, columns=xs)
+    df.index.name = "Z_WL (m)"
+    df.columns.name = "Estações X (m)"
+    return df
+
 def generate_real_ship():
     """
     Lancha Salva-Vidas (Jaraqui Nautidesign) — Projeto Oficial AP1.1
@@ -1192,7 +1202,7 @@ else:
         # Validação Cruzada de Dupla Integração (Padrão Seoul National University)
         err_vol = data_t.get("Erro_Vol", 0.0)
         if err_vol < 0.05:
-            st.success(f"✅ **Dupla Integração Cruzada Validada (Padrão SNU / Term Project 2):** Volume Longitudinal ($\int A_{{sec}} dx$) $\equiv$ Volume Vertical ($\int A_{{wp}} dz$) | Diferença = **{err_vol:.4f}%** (< 0.05%)")
+            st.success(f"✅ **Dupla Integração Cruzada Validada (Padrão SNU / Term Project 2):** Volume Longitudinal ($\\int A_{{sec}} dx$) $\\equiv$ Volume Vertical ($\\int A_{{wp}} dz$) | Diferença = **{err_vol:.4f}%** (< 0.05%)")
         else:
             st.info(f"ℹ️ Dupla Integração: Diferença entre integração longitudinal e vertical = {err_vol:.3f}%")
 
