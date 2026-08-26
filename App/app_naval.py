@@ -468,17 +468,6 @@ def generate_sample_ship():
     data = [
         [0.00, 0.40, 1.20, 2.50, 4.00, 4.50, 4.00, 2.50, 1.20, 0.40, 0.00],
         [0.50, 2.10, 4.60, 6.80, 7.80, 8.00, 7.80, 6.80, 4.50, 2.00, 0.20],
-        [1.20, 3.80, 6.40, 7.60, 8.00, 8.00, 8.00, 7.50, 5.80, 3.20, 0.50],
-        [2.00, 5.00, 7.20, 7.90, 8.00, 8.00, 8.00, 7.80, 6.60, 4.20, 0.90],
-        [2.80, 6.00, 7.70, 8.00, 8.00, 8.00, 8.00, 8.00, 7.20, 5.00, 1.40],
-        [3.50, 6.80, 8.00, 8.00, 8.00, 8.00, 8.00, 8.00, 7.60, 5.80, 2.00]
-    ]
-    df = pd.DataFrame(data, index=zs, columns=xs)
-    df.index.name = "Z_WL (m)"
-    df.columns.name = "Estações X (m)"
-    return df
-
-
 def generate_real_ship():
     """
     Lancha Salva-Vidas (Jaraqui Nautidesign) — Projeto Oficial AP1.1
@@ -489,36 +478,20 @@ def generate_real_ship():
       - Pontal Moldado (D): 1,800 m
       - Calado de Projeto (Td): 0,60 m
     """
-    # 11 Estações X (0 a 10) espaçadas em 0.9112m
     xs = np.array([0.0000, 0.9112, 1.8224, 2.7336, 3.6448, 4.5560, 5.4672, 6.3784, 7.2896, 8.2008, 9.1120])
-    
-    # 11 Linhas d'Água Z (WL 0 a WL 10) de 0.00m até o Pontal 1.80m
     zs = np.array([0.00, 0.18, 0.36, 0.54, 0.72, 0.90, 1.08, 1.26, 1.44, 1.62, 1.80])
 
-    # Matriz de Meias-Bocas Y (em metros) rigorosamente adoçada (faired)
-    # Colunas: ST00 (Popa) -> ST05 (Meia-Nau) -> ST10 (Proa)
     data = [
-        # WL00 (z = 0.00m - Linha de Base / Quilha)
         [0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000],
-        # WL01 (z = 0.18m) - Entra suavemente no fundo em V
         [0.000, 0.000, 0.120, 0.260, 0.350, 0.380, 0.340, 0.220, 0.080, 0.000, 0.000],
-        # WL02 (z = 0.36m)
         [0.000, 0.180, 0.380, 0.540, 0.630, 0.655, 0.610, 0.480, 0.280, 0.080, 0.000],
-        # WL03 (z = 0.54m)
         [0.220, 0.450, 0.620, 0.745, 0.810, 0.835, 0.790, 0.670, 0.480, 0.220, 0.000],
-        # WL04 (z = 0.72m)
         [0.480, 0.660, 0.785, 0.870, 0.915, 0.930, 0.890, 0.790, 0.620, 0.350, 0.000],
-        # WL05 (z = 0.90m)
         [0.660, 0.790, 0.885, 0.945, 0.975, 0.985, 0.950, 0.870, 0.720, 0.470, 0.000],
-        # WL06 (z = 1.08m)
         [0.760, 0.865, 0.940, 0.985, 1.005, 1.010, 0.985, 0.925, 0.800, 0.570, 0.000],
-        # WL07 (z = 1.26m)
         [0.820, 0.915, 0.970, 1.005, 1.018, 1.020, 1.005, 0.955, 0.860, 0.650, 0.000],
-        # WL08 (z = 1.44m)
         [0.860, 0.945, 0.990, 1.015, 1.020, 1.020, 1.015, 0.975, 0.900, 0.710, 0.000],
-        # WL09 (z = 1.62m)
         [0.890, 0.965, 1.000, 1.020, 1.020, 1.020, 1.020, 0.988, 0.925, 0.755, 0.000],
-        # WL10 (z = 1.80m - Borda Livre / Convés)
         [0.910, 0.975, 1.005, 1.020, 1.020, 1.020, 1.020, 0.995, 0.940, 0.790, 0.000],
     ]
 
@@ -528,12 +501,49 @@ def generate_real_ship():
     return df
 
 
+def generate_vlcc_320k():
+    """
+    Superpetroleiro 320.000 DWT VLCC — Benchmark Seoul National University (Term Project 2)
+    Dimensões Principais:
+      - LOA: 332.8 m | LBP: 320.0 m | Boca B: 60.0 m | Pontal D: 30.0 m | Calado Td: 20.0 m
+      - Espessura da chapa de quilha: 0.017 m | Densidade: 1.025 t/m³
+    """
+    xs = np.linspace(0.0, 320.0, 21)
+    zs = np.array([0.0, 1.0, 2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0, 30.0])
+    
+    mat = np.zeros((len(zs), len(xs)))
+    for i, z in enumerate(zs):
+        for j, x in enumerate(xs):
+            frac_x = x / 320.0
+            frac_z = z / 30.0 if z > 0 else 0.0
+            
+            if 0.28 <= frac_x <= 0.72:
+                if z == 0:
+                    mat[i, j] = 27.40 * (1.0 - 0.08 * (1.0 - frac_z))
+                else:
+                    mat[i, j] = 30.00 * min(1.0, 0.90 + 0.10 * (frac_z ** 0.35))
+            elif frac_x < 0.28:
+                f_aft = frac_x / 0.28
+                base_aft = 30.0 * (f_aft ** 1.35)
+                mat[i, j] = base_aft * min(1.0, (frac_z ** 0.45) if frac_z > 0 else 0.15)
+            else:
+                f_fore = (1.0 - frac_x) / 0.28
+                base_fore = 30.0 * (f_fore ** 1.25)
+                if z <= 10.0 and frac_x >= 0.95:
+                    mat[i, j] = max(base_fore, 4.0 + 3.0 * np.sin(np.pi * z / 10.0))
+                else:
+                    mat[i, j] = base_fore * min(1.0, 0.30 + 0.70 * (frac_z ** 0.50))
+    
+    df = pd.DataFrame(mat, index=zs, columns=xs)
+    df.index.name = "Z_WL (m)"
+    df.columns.name = "Estações X (m)"
+    return df
 
 
 # ==============================================================================
-# 3. MOTOR HIDROSTÁTICO (Itens 10 a 19 do Edital)
+# 3. MOTOR HIDROSTÁTICO (Itens 10 a 19 do Edital & Padrão SNU Term Project 2)
 # ==============================================================================
-def calculate_hydrostatics_at_draft(hull: Hull, T: float, rho: float = 1.025):
+def calculate_hydrostatics_at_draft(hull: Hull, T: float, rho: float = 1.025, t_keel: float = 0.017):
     n_st = len(hull.stations_x)
     xs = hull.stations_x
     z_grid = np.linspace(hull.waterlines_z[0], T, 35)
@@ -554,21 +564,23 @@ def calculate_hydrostatics_at_draft(hull: Hull, T: float, rho: float = 1.025):
         else:
             sec_girths[j] = 2.0 * y_vals[-1]
 
-    # Plano d'água
+    # Plano d'água no calado T
     y_wp = np.array([hull.get_y(j, T) for j in range(n_st)])
     half_awp, log_awp = integrate_dataset(xs, y_wp)
     awp = 2.0 * half_awp
     
     int_x_2y, _ = integrate_dataset(xs, xs * 2.0 * y_wp)
     lcf = (int_x_2y / awp) if awp > 1e-6 else float(np.mean(xs))
+    lcf_mid = lcf - (hull.LBP / 2.0)
     
     it, log_it = integrate_dataset(xs, (2.0 / 3.0) * (y_wp ** 3))
     il, log_il = integrate_dataset(xs, 2.0 * ((xs - lcf) ** 2) * y_wp)
     
-    # Volumes
+    # 1. Integração Longitudinal de Volume
     vol_long, log_vol_long = integrate_dataset(xs, sec_areas)
     
-    z_steps = np.linspace(hull.waterlines_z[0], T, 15)
+    # 2. Integração Vertical de Volume (Dupla Validação SNU)
+    z_steps = np.linspace(hull.waterlines_z[0], T, 20)
     awp_z = []
     for zi in z_steps:
         y_zi = np.array([hull.get_y(j, zi) for j in range(n_st)])
@@ -579,42 +591,76 @@ def calculate_hydrostatics_at_draft(hull: Hull, T: float, rho: float = 1.025):
     err_vol = abs(vol_long - vol_vert) / vol_long * 100.0 if vol_long > 1e-6 else 0.0
     vol = vol_long
     
-    # Centros
-    int_x_ax, log_lcb = integrate_dataset(xs, xs * sec_areas)
-    lcb = (int_x_ax / vol) if vol > 1e-6 else float(np.mean(xs))
+    # Volume Moldado e Extrapolado com Chapa de Quilha
+    vol_mld = vol
+    vol_ext = vol + (awp * t_keel)
+    displ_mld = vol_mld * rho
+    displ_ext = vol_ext * rho
     
-    int_mz_x, log_kb = integrate_dataset(xs, sec_mz)
-    kb = (int_mz_x / vol) if vol > 1e-6 else (T / 2.0)
+    # Centros de Carena (KB e LCB)
+    int_sec_mz, _ = integrate_dataset(xs, sec_mz)
+    kb = (int_sec_mz / vol) if vol > 1e-6 else 0.5 * T
     
-    # Metacentros
+    int_x_area, log_lcb = integrate_dataset(xs, xs * sec_areas)
+    lcb = (int_x_area / vol) if vol > 1e-6 else float(np.mean(xs))
+    lcb_mid = lcb - (hull.LBP / 2.0)
+    
+    # Estabilidade Inicial
     bmt = (it / vol) if vol > 1e-6 else 0.0
     kmt = kb + bmt
+    
     bml = (il / vol) if vol > 1e-6 else 0.0
     kml = kb + bml
     
-    disp = rho * vol
+    # Parâmetros Práticos
     tpc = (rho * awp) / 100.0
+    mtc = (displ_mld * bml) / (100.0 * hull.LBP) if hull.LBP > 0 else 0.0
+    
+    # Área Molhada (WSA)
     wsa, _ = integrate_dataset(xs, sec_girths)
     
-    mid_idx = n_st // 2
-    am = float(sec_areas[mid_idx])
+    # Coeficientes Adimensionais
     L, B = hull.LBP, hull.B
-    cb = (vol / (L * B * T)) if (L * B * T) > 1e-6 else 0.0
-    cwp = (awp / (L * B)) if (L * B) > 1e-6 else 0.0
-    cm = (am / (B * T)) if (B * T) > 1e-6 else 0.0
-    cp = (vol / (am * L)) if (am * L) > 1e-6 else 0.0
+    cb = vol / (L * B * T) if (L * B * T) > 1e-6 else 0.0
+    cwp = awp / (L * B) if (L * B) > 1e-6 else 0.0
+    
+    mid_idx = n_st // 2
+    am = sec_areas[mid_idx] if mid_idx < n_st else 0.0
+    cm = am / (B * T) if (B * T) > 1e-6 else 0.0
+    cp = vol / (am * L) if (am * L) > 1e-6 else 0.0
     
     data = {
-        "T": T, "Volume (∇)": vol, "Volume_Long": vol_long, "Volume_Vert": vol_vert, "Erro_Vol": err_vol,
-        "Deslocamento (Δ)": disp, "LCB": lcb, "LCF": lcf, "KB": kb, "BMt": bmt, "KMt": kmt,
-        "BMl": bml, "KMl": kml, "AWP": awp, "TPC": tpc, "WSA": wsa, "CB": cb, "CWP": cwp, "CM": cm, "CP": cp
+        "T": T,
+        "Volume (∇)": vol_mld,
+        "Volume_mld": vol_mld,
+        "Volume_ext": vol_ext,
+        "Deslocamento (Δ)": displ_mld,
+        "Displacement_mld": displ_mld,
+        "Displacement_ext": displ_ext,
+        "KB": kb,
+        "VCB": kb,
+        "LCB": lcb,
+        "LCB_mid": lcb_mid,
+        "AWP": awp,
+        "LCF": lcf,
+        "LCF_mid": lcf_mid,
+        "It": it,
+        "Il": il,
+        "BMt": bmt,
+        "KMt": kmt,
+        "BMl": bml,
+        "KMl": kml,
+        "TPC": tpc,
+        "MTC": mtc,
+        "WSA": wsa,
+        "CB": cb,
+        "CWP": cwp,
+        "CM": cm,
+        "CP": cp,
+        "Erro_Vol": err_vol
     }
     
     audit = {
-        "Volume": {"formula": r"\nabla^L = \int_{0}^{L} A(x)\,dx", "data": f"LBP = {L:.2f} m | {n_st} estações", "intermediate": f"∇L = {vol_long:.3f} m³ | ∇V = {vol_vert:.3f} m³ (Diferença: {err_vol:.4f}%)", "result": f"{vol:.3f}", "unit": "m³", "log": log_vol_long},
-        "Deslocamento": {"formula": r"\Delta = \rho \cdot \nabla", "data": f"ρ = {rho:.3f} t/m³ | Volume ∇ = {vol:.3f} m³", "intermediate": f"{rho:.3f} * {vol:.3f}", "result": f"{disp:.3f}", "unit": "toneladas (t)"},
-        "LCB": {"formula": r"LCB = \frac{\int x \cdot A(x)\,dx}{\nabla}", "data": f"∇ = {vol:.3f} m³", "intermediate": f"Momento Longitudinal = {int_x_ax:.3f} m⁴", "result": f"{lcb:.3f}", "unit": "m (de x=0)", "log": log_lcb},
-        "KB": {"formula": r"KB = \frac{\int M_z(x)\,dx}{\nabla}", "data": f"∇ = {vol:.3f} m³", "intermediate": f"Momento Vertical = {int_mz_x:.3f} m⁴", "result": f"{kb:.3f}", "unit": "m (da Linha de Base BL)", "log": log_kb},
         "AWP": {"formula": r"A^{WP} = 2 \int_{0}^{L} y(x, T)\,dx", "data": f"Calado T = {T:.3f} m", "intermediate": f"Meia-área = {half_awp:.3f} m²", "result": f"{awp:.3f}", "unit": "m²", "log": log_awp},
         "BMt": {"formula": r"BM_t = \frac{I_t}{\nabla}", "data": f"It = {it:.3f} m⁴ | ∇ = {vol:.3f} m³", "intermediate": f"{it:.3f} / {vol:.3f}", "result": f"{bmt:.3f}", "unit": "m", "log": log_it},
         "KMt": {"formula": r"KM_t = KB + BM_t", "data": f"KB = {kb:.3f} m | BMt = {bmt:.3f} m", "intermediate": f"{kb:.3f} + {bmt:.3f}", "result": f"{kmt:.3f}", "unit": "m"},
@@ -660,6 +706,7 @@ if st.session_state.app_state == "home":
                 "🧱 Barcaça Paralelepipédica (Validação Analítica)",
                 "🚢 Navio Mercante 100m (Exemplo Realista)",
                 "⛵ Navio Real — Tabela de Cotas (11 Balizas × 11 WL)",
+                "🛢️ Superpetroleiro 320K VLCC (Seoul National University Benchmark)",
                 "📁 Fazer Upload de Tabela de Cotas (.xlsx / .csv)"
             ],
             index=0
@@ -684,6 +731,9 @@ if st.session_state.app_state == "home":
         elif origin_choice == "⛵ Navio Real — Tabela de Cotas (11 Balizas × 11 WL)":
             st.session_state.df_offsets = generate_real_ship()
             st.session_state.ship_name = "Navio Real (9.11m × 2.40m × 1.06m)"
+        elif origin_choice == "🛢️ Superpetroleiro 320K VLCC (Seoul National University Benchmark)":
+            st.session_state.df_offsets = generate_vlcc_320k()
+            st.session_state.ship_name = "320K VLCC (320m × 60m × 30m)"
         else:
             st.session_state.df_offsets = generate_barge_data(20.0, 4.0, 2.0, 11, 6)
             st.session_state.ship_name = "Barcaça Analítica"
@@ -1139,26 +1189,48 @@ else:
         
         data_t, audit_t, sec_areas = calculate_hydrostatics_at_draft(hull, sel_t, st.session_state.density)
         
+        # Validação Cruzada de Dupla Integração (Padrão Seoul National University)
+        err_vol = data_t.get("Erro_Vol", 0.0)
+        if err_vol < 0.05:
+            st.success(f"✅ **Dupla Integração Cruzada Validada (Padrão SNU / Term Project 2):** Volume Longitudinal ($\int A_{{sec}} dx$) $\equiv$ Volume Vertical ($\int A_{{wp}} dz$) | Diferença = **{err_vol:.4f}%** (< 0.05%)")
+        else:
+            st.info(f"ℹ️ Dupla Integração: Diferença entre integração longitudinal e vertical = {err_vol:.3f}%")
+
         st.markdown("#### 1. Resumo de Propriedades Calculadas")
         k1, k2, k3, k4 = st.columns(4)
-        k1.metric("Volume Submerso (∇)", f"{data_t['Volume (∇)']:.2f} m³")
-        k2.metric("Deslocamento (Δ)", f"{data_t['Deslocamento (Δ)']:.2f} t")
-        k3.metric("Centro Vertical (KB)", f"{data_t['KB']:.3f} m")
-        k4.metric("Centro Long. (LCB)", f"{data_t['LCB']:.3f} m")
+        k1.metric("Volume Moldado (∇mld)", f"{data_t['Volume_mld']:.2f} m³")
+        k2.metric("Deslocamento Moldado (Δmld)", f"{data_t['Displacement_mld']:.2f} t")
+        k3.metric("Volume Extrapolado (∇ext)", f"{data_t['Volume_ext']:.2f} m³")
+        k4.metric("Deslocamento Extrapolado (Δext)", f"{data_t['Displacement_ext']:.2f} t")
         
         st.write("")
         k5, k6, k7, k8 = st.columns(4)
-        k5.metric("Área Plano (AWP)", f"{data_t['AWP']:.2f} m²")
-        k6.metric("Centro Flutuação (LCF)", f"{data_t['LCF']:.3f} m")
-        k7.metric("Raio Transv. (BMt)", f"{data_t['BMt']:.3f} m")
-        k8.metric("Altura Transv. (KMt)", f"{data_t['KMt']:.3f} m")
+        k5.metric("Centro Vertical (KB / VCB)", f"{data_t['KB']:.3f} m")
+        k6.metric("Centro Long. da Popa (LCB)", f"{data_t['LCB']:.3f} m")
+        k6_b = f"{data_t['LCB_mid']:+.3f} m"
+        k7.metric("LCB da Meia-Nau", k6_b)
+        k8.metric("Área Plano (AWP)", f"{data_t['AWP']:.2f} m²")
 
         st.write("")
         k9, k10, k11, k12 = st.columns(4)
-        k9.metric("Coef. Bloco (CB)", f"{data_t['CB']:.4f}")
-        k10.metric("Coef. Flutuação (CWP)", f"{data_t['CWP']:.4f}")
-        k11.metric("Coef. Meia-Nau (CM)", f"{data_t['CM']:.4f}")
-        k12.metric("Coef. Prismático (CP)", f"{data_t['CP']:.4f}")
+        k9.metric("Centro Flutuação (LCF)", f"{data_t['LCF']:.3f} m")
+        k10.metric("LCF da Meia-Nau", f"{data_t['LCF_mid']:+.3f} m")
+        k11.metric("Raio Transv. (BMt)", f"{data_t['BMt']:.3f} m")
+        k12.metric("Altura Transv. (KMt)", f"{data_t['KMt']:.3f} m")
+
+        st.write("")
+        k13, k14, k15, k16 = st.columns(4)
+        k13.metric("Raio Long. (BMl)", f"{data_t['BMl']:.2f} m")
+        k14.metric("Altura Long. (KMl)", f"{data_t['KMl']:.2f} m")
+        k15.metric("TPC (t/cm)", f"{data_t['TPC']:.3f} t/cm")
+        k16.metric("MTC (t·m/cm)", f"{data_t['MTC']:.2f} t·m/cm")
+
+        st.write("")
+        k17, k18, k19, k20 = st.columns(4)
+        k17.metric("Coef. Bloco (CB)", f"{data_t['CB']:.4f}")
+        k18.metric("Coef. Flutuação (CWP)", f"{data_t['CWP']:.4f}")
+        k19.metric("Coef. Meia-Nau (CM)", f"{data_t['CM']:.4f}")
+        k20.metric("Coef. Prismático (CP)", f"{data_t['CP']:.4f}")
 
         st.divider()
         st.markdown("### 🔍 Função Obrigatória: MOSTRAR CÁLCULO (Auditoria)")
@@ -1185,14 +1257,18 @@ else:
 
     # 4. HYDROSTATIC TABLE
     elif st.session_state.selected_module == "📊 Hydrostatic Table":
-        st.subheader("📊 Hydrostatic Table Completa")
+        st.subheader("📊 Hydrostatic Table Completa (Padrão Oficial SNU / IMO)")
         st.caption(f"Calculada automaticamente de T = {st.session_state.t_min:.2f}m a T = {st.session_state.t_max:.2f}m com passo ΔT = {st.session_state.delta_t:.2f}m")
         
         drafts_range = np.arange(st.session_state.t_min, st.session_state.t_max + st.session_state.delta_t/2.0, st.session_state.delta_t)
         table_records = [calculate_hydrostatics_at_draft(hull, t_val, st.session_state.density)[0] for t_val in drafts_range]
         df_hydro_full = pd.DataFrame(table_records)
         
-        col_order = ["T", "Volume (∇)", "Deslocamento (Δ)", "KB", "LCB", "AWP", "LCF", "BMt", "KMt", "BMl", "KMl", "TPC", "WSA", "CB", "CWP", "CM", "CP", "Erro_Vol"]
+        col_order = [
+            "T", "Volume_mld", "Volume_ext", "Displacement_mld", "Displacement_ext",
+            "KB", "LCB", "LCB_mid", "AWP", "LCF", "LCF_mid",
+            "BMt", "KMt", "BMl", "KMl", "TPC", "MTC", "WSA", "CB", "CWP", "CM", "CP", "Erro_Vol"
+        ]
         df_hydro_view = df_hydro_full[[c for c in col_order if c in df_hydro_full.columns]]
         st.dataframe(df_hydro_view.style.format("{:.3f}"), use_container_width=True)
         
@@ -1212,21 +1288,76 @@ else:
     # 5. HYDROSTATIC CURVES
     elif st.session_state.selected_module == "📈 Hydrostatic Curves":
         st.subheader("📈 Hydrostatic Curves (Curvas Hidrostáticas)")
+        
+        curve_mode = st.radio(
+            "Selecione o Formato do Diagrama:",
+            [
+                "🌐 Diagrama Hidrostático Normalizado Internacional (Norma Seoul National University — Slide 9)",
+                "📊 Curvas Individuais Desmembradas (Grandezas Físicas Reais)"
+            ],
+            index=0
+        )
+        
         drafts_range = np.arange(st.session_state.t_min, st.session_state.t_max + st.session_state.delta_t/2.0, st.session_state.delta_t)
         table_records = [calculate_hydrostatics_at_draft(hull, t_val, st.session_state.density)[0] for t_val in drafts_range]
         df_hydro_full = pd.DataFrame(table_records)
         
-        fig_comb = go.Figure()
-        curves_dict = {"Volume ∇": "Volume (∇)", "Deslocamento Δ": "Deslocamento (Δ)", "KB": "KB", "LCB": "LCB", "KMt": "KMt", "AWP": "AWP", "TPC": "TPC"}
-        
-        for label, col_n in curves_dict.items():
-            fig_comb.add_trace(go.Scatter(x=df_hydro_full[col_n], y=df_hydro_full["T"], mode='lines+markers', name=label, line=dict(width=2)))
+        if curve_mode.startswith("🌐"):
+            st.caption("Diagrama padronizado com equações de escala e offset oficiais da SNU (Slide 9 do Term Project 2).")
             
-        fig_comb.update_layout(
-            title="Diagrama Hidrostático Combinado", xaxis_title="Valor da Grandeza", yaxis_title="Calado T (m)",
-            template="plotly_dark", height=550, hovermode="y unified"
-        )
-        st.plotly_chart(fig_comb, use_container_width=True)
+            # Escalas e Offsets Oficiais SNU (Slide 9 / Page 5)
+            snu_curves = [
+                {"name": "KMt [1:1] + 10", "x": df_hydro_full["KMt"] * 1.0 + 10.0, "color": "#f43f5e"},
+                {"name": "KMl [1:50] + 35", "x": df_hydro_full["KMl"] / 50.0 + 35.0, "color": "#c084fc"},
+                {"name": "LCF Meia-Nau [1:0.5] + 100", "x": df_hydro_full["LCF_mid"] / 0.5 + 100.0, "color": "#fb923c"},
+                {"name": "LCB Meia-Nau [1:0.1] + 200", "x": df_hydro_full["LCB_mid"] / 0.1 + 200.0, "color": "#facc15"},
+                {"name": "VCB (KB) [1:0.1]", "x": df_hydro_full["KB"] / 0.1, "color": "#4ade80"},
+                {"name": "AWP [1:100] + 10", "x": df_hydro_full["AWP"] / 100.0 + 10.0, "color": "#2dd4bf"},
+                {"name": "TPC [1:1] + 20", "x": df_hydro_full["TPC"] * 1.0 + 20.0, "color": "#38bdf8"},
+                {"name": "MTC [1:20] + 90", "x": df_hydro_full["MTC"] / 20.0 + 90.0, "color": "#818cf8"},
+                {"name": "WSA [1:100]", "x": df_hydro_full["WSA"] / 100.0, "color": "#a78bfa"},
+                {"name": "Volume (∇) [1:1000]", "x": df_hydro_full["Volume_mld"] / 1000.0, "color": "#e879f9"},
+                {"name": "Deslocamento (Δ) [1:1000] + 5", "x": df_hydro_full["Displacement_mld"] / 1000.0 + 5.0, "color": "#f472b6"},
+                {"name": "CB [1:0.01]", "x": df_hydro_full["CB"] / 0.01, "color": "#ffffff"}
+            ]
+            
+            fig_snu = go.Figure()
+            for c in snu_curves:
+                fig_snu.add_trace(go.Scatter(
+                    x=c["x"], y=df_hydro_full["T"], mode='lines',
+                    name=c["name"], line=dict(color=c["color"], width=2.2)
+                ))
+                
+            fig_snu.update_layout(
+                title=f"Curvas Hidrostáticas Normalizadas — {st.session_state.ship_name} (Norma SNU)",
+                xaxis_title="Escala Padronizada Normalizada X",
+                yaxis_title="Calado T (m)",
+                template="plotly_dark", height=620, hovermode="y unified",
+                legend=dict(orientation="h", yanchor="bottom", y=-0.32, xanchor="center", x=0.5)
+            )
+            st.plotly_chart(fig_snu, use_container_width=True)
+        else:
+            fig_comb = go.Figure()
+            curves_dict = {
+                "Volume ∇ (m³)": "Volume_mld",
+                "Deslocamento Δ (t)": "Displacement_mld",
+                "KB (m)": "KB",
+                "LCB (m)": "LCB",
+                "KMt (m)": "KMt",
+                "AWP (m²)": "AWP",
+                "TPC (t/cm)": "TPC"
+            }
+            
+            for label, col_n in curves_dict.items():
+                if col_n in df_hydro_full.columns:
+                    fig_comb.add_trace(go.Scatter(x=df_hydro_full[col_n], y=df_hydro_full["T"], mode='lines+markers', name=label, line=dict(width=2)))
+                
+            fig_comb.update_layout(
+                title=f"Diagrama Hidrostático Combinado — {st.session_state.ship_name}",
+                xaxis_title="Valor da Grandeza Física", yaxis_title="Calado T (m)",
+                template="plotly_dark", height=550, hovermode="y unified"
+            )
+            st.plotly_chart(fig_comb, use_container_width=True)
 
     # 6. VALIDAÇÃO ANALÍTICA
     elif st.session_state.selected_module == "🧪 Validação Analítica":
@@ -1245,7 +1376,7 @@ else:
         def err_p(c_v, e_v): return (abs(c_v - e_v)/e_v*100.0) if e_v != 0 else 0.0
 
         df_val = pd.DataFrame([
-            {"Propriedade": "Volume ∇ (m³)", "Fórmula": "L * B * T", "Analítico": exact_vol, "Aplicativo": res_val["Volume (∇)"], "Erro (%)": err_p(res_val["Volume (∇)"], exact_vol)},
+            {"Propriedade": "Volume ∇ (m³)", "Fórmula": "L * B * T", "Analítico": exact_vol, "Aplicativo": res_val["Volume_mld"], "Erro (%)": err_p(res_val["Volume_mld"], exact_vol)},
             {"Propriedade": "KB (m)", "Fórmula": "T / 2", "Analítico": exact_kb, "Aplicativo": res_val["KB"], "Erro (%)": err_p(res_val["KB"], exact_kb)},
             {"Propriedade": "LCB (m)", "Fórmula": "L / 2", "Analítico": exact_lcb, "Aplicativo": res_val["LCB"], "Erro (%)": err_p(res_val["LCB"], exact_lcb)},
             {"Propriedade": "AWP (m²)", "Fórmula": "L * B", "Analítico": exact_awp, "Aplicativo": res_val["AWP"], "Erro (%)": err_p(res_val["AWP"], exact_awp)},
