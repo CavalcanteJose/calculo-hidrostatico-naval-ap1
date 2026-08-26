@@ -759,12 +759,31 @@ if st.session_state.app_state == "home":
         st.subheader("⚙️ 2. Parâmetros da Embarcação")
         st.caption("Verifique as dimensões principais e a densidade da água.")
         
-        df_curr = st.session_state.get("df_offsets", generate_barge_data())
-        # Clamp valores para garantir que estejam acima dos mínimos dos widgets
-        calc_lbp = max(1.0, float(df_curr.columns[-1]) - float(df_curr.columns[0]))
-        calc_beam = max(0.5, float(2.0 * df_curr.values.max()))
-        calc_depth = max(0.5, float(df_curr.index[-1]))
-        calc_td = max(0.1, float(calc_depth * 0.7))
+        df_curr = st.session_state.get("df_offsets", None)
+        if df_curr is None or not isinstance(df_curr, pd.DataFrame):
+            df_curr = generate_real_ship()
+            st.session_state.df_offsets = df_curr
+
+        def _get_num(val, default=1.0):
+            try:
+                v = extract_numeric_value(val, default)
+                return float(v) if v is not None else float(default)
+            except Exception:
+                return float(default)
+
+        # Determina dimensões principais de forma segura
+        col_first = _get_num(df_curr.columns[0], 0.0)
+        col_last = _get_num(df_curr.columns[-1], 20.0)
+        calc_lbp = max(1.0, float(col_last - col_first))
+        if calc_lbp <= 1.0:
+            calc_lbp = max(1.0, float(col_last))
+            
+        max_half_b = float(np.nanmax(df_curr.values)) if df_curr.values.size > 0 else 2.0
+        calc_beam = max(0.5, float(2.0 * max_half_b))
+        
+        idx_last = _get_num(df_curr.index[-1], 2.0)
+        calc_depth = max(0.5, float(idx_last))
+        calc_td = max(0.1, float(calc_depth * 0.65))
         
         col_p1, col_p2 = st.columns(2)
         st.session_state.lbp = col_p1.number_input("LBP (m)", value=calc_lbp, min_value=1.0, step=1.0)
