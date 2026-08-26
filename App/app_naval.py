@@ -495,32 +495,31 @@ def generate_real_ship():
     # 11 Linhas d'Água Z (WL 0 a WL 10) de 0.00m até o Pontal 1.80m
     zs = np.array([0.00, 0.18, 0.36, 0.54, 0.72, 0.90, 1.08, 1.26, 1.44, 1.62, 1.80])
 
-    # Matriz de Meias-Bocas Y (em metros)
+    # Matriz de Meias-Bocas Y (em metros) perfeitamente ajustada à geometria do PDF
     # Colunas: ST00 (Popa) -> ST05 (Meia-Nau) -> ST10 (Proa)
-    # Boca máxima de 2.040m -> Meia-boca máxima de 1.020m
     data = [
-        # WL00 (z = 0.00m - Linha de Base)
+        # WL00 (z = 0.00m - Linha de Base / Quilha)
         [0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000],
         # WL01 (z = 0.18m)
-        [0.320, 0.360, 0.390, 0.410, 0.400, 0.380, 0.340, 0.280, 0.190, 0.080, 0.000],
+        [0.300, 0.350, 0.380, 0.400, 0.410, 0.400, 0.360, 0.280, 0.180, 0.080, 0.000],
         # WL02 (z = 0.36m)
-        [0.550, 0.610, 0.660, 0.690, 0.700, 0.680, 0.630, 0.530, 0.390, 0.180, 0.000],
+        [0.520, 0.580, 0.630, 0.660, 0.670, 0.660, 0.620, 0.520, 0.380, 0.190, 0.000],
         # WL03 (z = 0.54m)
-        [0.720, 0.780, 0.830, 0.860, 0.870, 0.860, 0.810, 0.710, 0.550, 0.280, 0.000],
+        [0.680, 0.740, 0.790, 0.820, 0.830, 0.820, 0.780, 0.700, 0.550, 0.300, 0.000],
         # WL04 (z = 0.72m)
-        [0.820, 0.870, 0.920, 0.950, 0.960, 0.950, 0.910, 0.820, 0.670, 0.370, 0.000],
+        [0.780, 0.840, 0.880, 0.910, 0.920, 0.910, 0.880, 0.810, 0.670, 0.400, 0.000],
         # WL05 (z = 0.90m)
-        [0.870, 0.920, 0.960, 0.990, 1.000, 0.990, 0.960, 0.880, 0.750, 0.450, 0.000],
+        [0.840, 0.900, 0.940, 0.960, 0.970, 0.960, 0.940, 0.880, 0.760, 0.490, 0.000],
         # WL06 (z = 1.08m)
-        [0.900, 0.940, 0.980, 1.010, 1.015, 1.010, 0.980, 0.920, 0.810, 0.520, 0.000],
+        [0.880, 0.930, 0.970, 0.990, 1.000, 1.000, 0.980, 0.930, 0.830, 0.570, 0.000],
         # WL07 (z = 1.26m)
-        [0.915, 0.955, 0.990, 1.015, 1.020, 1.018, 0.995, 0.945, 0.850, 0.580, 0.000],
+        [0.900, 0.950, 0.990, 1.010, 1.018, 1.018, 1.005, 0.965, 0.885, 0.640, 0.000],
         # WL08 (z = 1.44m)
-        [0.925, 0.965, 0.998, 1.018, 1.020, 1.020, 1.005, 0.965, 0.885, 0.630, 0.000],
+        [0.920, 0.960, 1.000, 1.015, 1.020, 1.020, 1.015, 0.985, 0.925, 0.700, 0.000],
         # WL09 (z = 1.62m)
-        [0.930, 0.970, 1.002, 1.020, 1.020, 1.020, 1.012, 0.980, 0.915, 0.675, 0.000],
-        # WL10 (z = 1.80m - Convés / Borda Livre)
-        [0.935, 0.975, 1.005, 1.020, 1.020, 1.020, 1.018, 0.995, 0.940, 0.715, 0.000],
+        [0.930, 0.970, 1.005, 1.020, 1.020, 1.020, 1.020, 0.995, 0.950, 0.750, 0.000],
+        # WL10 (z = 1.80m - Borda Livre / Convés)
+        [0.940, 0.975, 1.010, 1.020, 1.020, 1.020, 1.020, 1.000, 0.965, 0.790, 0.000],
     ]
 
     df = pd.DataFrame(data, index=zs, columns=xs)
@@ -880,91 +879,136 @@ else:
 
         def get_waterlines_figure():
             fig = go.Figure()
-            xs_dense = np.linspace(hull.stations_x[0], hull.stations_x[-1], 100)
+            xs_dense = np.linspace(hull.stations_x[0], hull.stations_x[-1], 120)
             
-            # Estações como linhas verticais
+            # Grade de Estações (Linhas verticais vermelhas como no PDF)
             for j, st_x in enumerate(hull.stations_x):
-                fig.add_vline(x=st_x, line_dash="dot", line_color="rgba(148, 163, 184, 0.25)", line_width=1)
+                fig.add_vline(
+                    x=st_x, line_dash="solid", line_color="rgba(239, 68, 68, 0.6)", line_width=1.2,
+                    annotation_text=f"ST {j:02d}", annotation_position="top"
+                )
 
-            # Linhas d'água existentes interpoladas de forma contínua e suave
-            for wz in hull.waterlines_z:
+            # Linhas d'água existentes (WL 01 a WL 10)
+            for k, wz in enumerate(hull.waterlines_z):
+                if wz <= 0.0:
+                    continue
                 ys_wz = [hull.get_y_continuous(xv, wz) for xv in xs_dense]
                     
                 fig.add_trace(go.Scatter(
                     x=xs_dense, y=ys_wz, mode='lines',
-                    name=f"WL z={wz:.2f}m", line=dict(width=1.5)
+                    name=f"WL {k:02d} (z={wz:.2f}m)",
+                    line=dict(color="#3b82f6", width=1.6)
                 ))
+                # Espelhamento para visualização simétrica
                 fig.add_trace(go.Scatter(
                     x=xs_dense, y=[-v for v in ys_wz], mode='lines',
-                    showlegend=False, line=dict(width=1.2, dash='dot')
+                    showlegend=False,
+                    line=dict(color="#3b82f6", width=1.2, dash='dot')
                 ))
 
-            # Linha d'água ativa em destaque
+            # Linha d'água ativa do calado selecionado em destaque
             ys_active = [hull.get_y_continuous(xv, viz_draft) for xv in xs_dense]
             fig.add_trace(go.Scatter(
                 x=xs_dense, y=ys_active, mode='lines',
                 name=f"★ WL Ativa T={viz_draft:.2f}m",
-                line=dict(color="#00f5d4", width=3.2)
+                line=dict(color="#00f5d4", width=3.5)
             ))
             fig.add_trace(go.Scatter(
                 x=xs_dense, y=[-v for v in ys_active], mode='lines',
-                showlegend=False, line=dict(color="#00f5d4", width=2.5, dash='dash')
+                showlegend=False,
+                line=dict(color="#00f5d4", width=2.5, dash='dash')
             ))
 
-            fig.add_hline(y=0, line_color="#48cae4", line_width=1.5, annotation_text="CL", annotation_position="left")
+            # Linha de Centro (CL)
+            fig.add_hline(y=0, line_color="#ef4444", line_width=1.8, annotation_text="℄ CL", annotation_position="left")
 
             fig.update_layout(
                 title="Plano de Linhas d'Água (Waterlines / Vista Superior)",
-                xaxis_title="Comprimento Longitudinal X (m) [Popa=0 → Proa=L]",
-                yaxis_title="Semi-boca Y (m)",
-                template="plotly_dark", height=480, margin=dict(l=20, r=20, t=40, b=20),
-                legend=dict(orientation="h", yanchor="bottom", y=-0.35, xanchor="center", x=0.5)
+                xaxis_title="Comprimento Longitudinal X (m) [ST 00 (Popa) → ST 10 (Proa)]",
+                yaxis_title="Semi-boca Y (m) [← Bombordo | Boreste →]",
+                template="plotly_dark", height=500, margin=dict(l=25, r=25, t=45, b=25),
+                legend=dict(orientation="h", yanchor="bottom", y=-0.38, xanchor="center", x=0.5)
             )
             return fig
 
         def get_sheer_figure():
             fig = go.Figure()
+            xs_dense = np.linspace(hull.stations_x[0], hull.stations_x[-1], 120)
             
-            # Estações como linhas verticais
+            # Grade de Estações (Linhas verticais vermelhas como no PDF)
             for j, st_x in enumerate(hull.stations_x):
-                fig.add_vline(x=st_x, line_dash="dot", line_color="rgba(148, 163, 184, 0.25)", line_width=1,
-                              annotation_text=f"ST{j}", annotation_position="top")
+                fig.add_vline(
+                    x=st_x, line_dash="solid", line_color="rgba(239, 68, 68, 0.6)", line_width=1.2,
+                    annotation_text=f"ST {j:02d}", annotation_position="top"
+                )
 
-            # Linhas d'Água como horizontais
-            for wz in hull.waterlines_z:
-                fig.add_hline(y=wz, line_dash="dot", line_color="rgba(148, 163, 184, 0.25)", line_width=1)
+            # Grade de Linhas d'Água (Linhas horizontais azuis como no PDF)
+            for k, wz in enumerate(hull.waterlines_z):
+                fig.add_hline(
+                    y=wz, line_dash="solid", line_color="rgba(59, 130, 246, 0.5)", line_width=1.0,
+                    annotation_text=f"WL {k:02d}" if k > 0 else "BL", annotation_position="left"
+                )
 
-            # Cortes Longitudinais / Linhas do Alto (Buttocks A, B, C a distâncias Y constantes)
-            xs_dense = np.linspace(hull.stations_x[0], hull.stations_x[-1], 80)
-            cuts_y = [hull.B * 0.15, hull.B * 0.30, hull.B * 0.45]
-            cut_names = ["Corte A (Y=15% B)", "Corte B (Y=30% B)", "Corte C (Y=45% B)"]
-            
-            for y_target, c_name in zip(cuts_y, cut_names):
-                z_buttock = []
-                for xv in xs_dense:
-                    z_eval = np.linspace(hull.waterlines_z[0], hull.D, 60)
-                    y_eval = np.array([hull.get_y_continuous(xv, zi) for zi in z_eval])
-                    if np.max(y_eval) >= y_target:
-                        valid_z = z_eval[y_eval >= y_target]
-                        z_buttock.append(float(valid_z[0]) if len(valid_z) > 0 else np.nan)
-                    else:
-                        z_buttock.append(np.nan)
-                
-                fig.add_trace(go.Scatter(
-                    x=xs_dense, y=z_buttock, mode='lines',
-                    name=f"Linha do Alto {c_name} (y={y_target:.2f}m)",
-                    line=dict(width=2.0)
-                ))
+            # 1. Linha de Perfil de Quilha & Roda de Proa (Perfil de Centro Y = 0)
+            keel_z = []
+            for xv in xs_dense:
+                # Na proa (ST 07 a ST 10), a quilha sobe suavemente até o convés
+                if xv >= hull.stations_x[7]:
+                    frac = (xv - hull.stations_x[7]) / (hull.stations_x[-1] - hull.stations_x[7])
+                    z_stem = hull.D * (frac ** 2.2)
+                    keel_z.append(float(z_stem))
+                else:
+                    keel_z.append(0.0)
+                    
+            fig.add_trace(go.Scatter(
+                x=xs_dense, y=keel_z, mode='lines',
+                name="Perfil de Quilha & Roda de Proa (Y=0)",
+                line=dict(color="#ffffff", width=2.8)
+            ))
 
-            # Linha de Contorno do Convés (Deck/Sheer line)
+            # 2. Linha do Convés / Borda Livre (Sheer Line)
             deck_z = np.full_like(xs_dense, hull.D)
             fig.add_trace(go.Scatter(
                 x=xs_dense, y=deck_z, mode='lines',
-                name=f"Linha de Borda Livre / Convés (z={hull.D:.2f}m)",
-                line=dict(color="#fca311", width=2.5)
+                name=f"Linha de Convés / Borda Livre (z={hull.D:.2f}m)",
+                line=dict(color="#fca311", width=2.6)
             ))
 
-            # Calado Ativo
+            # 3. Cortes Longitudinais / Linhas do Alto (Buttocks A, B, C a distâncias Y constantes)
+            cuts_y = [hull.B * 0.1667, hull.B * 0.3333, hull.B * 0.50]
+            cut_names = ["Corte A (Y = 1/6 Boca)", "Corte B (Y = 1/3 Boca)", "Corte C (Y = 1/2 Boca / Borda)"]
+            cut_colors = ["#a855f7", "#ec4899", "#38bdf8"]
+            
+            for y_target, c_name, c_color in zip(cuts_y, cut_names, cut_colors):
+                x_pts_buttock, z_pts_buttock = [], []
+                
+                for j, st_x in enumerate(hull.stations_x):
+                    # Avalia perfil vertical de semi-boca nesta estação
+                    z_eval = np.linspace(hull.waterlines_z[0], hull.D, 80)
+                    y_eval = np.array([hull.get_y(j, zi) for zi in z_eval])
+                    
+                    if np.max(y_eval) >= y_target:
+                        # Encontra cota Z onde a semi-boca atinge y_target
+                        valid_z = z_eval[y_eval >= y_target]
+                        x_pts_buttock.append(st_x)
+                        z_pts_buttock.append(float(valid_z[0]))
+
+                if len(x_pts_buttock) >= 3:
+                    # Interpolação PCHIP contínua e suave para a Linha do Alto
+                    x_buttock_dense = np.linspace(x_pts_buttock[0], x_pts_buttock[-1], 80)
+                    try:
+                        pchip_b = PchipInterpolator(x_pts_buttock, z_pts_buttock)
+                        z_buttock_dense = pchip_b(x_buttock_dense)
+                    except Exception:
+                        z_buttock_dense = np.interp(x_buttock_dense, x_pts_buttock, z_pts_buttock)
+
+                    fig.add_trace(go.Scatter(
+                        x=x_buttock_dense, y=z_buttock_dense, mode='lines',
+                        name=f"Linha do Alto {c_name} [y={y_target:.2f}m]",
+                        line=dict(color=c_color, width=2.2)
+                    ))
+
+            # Calado Ativo de Análise
             fig.add_hline(
                 y=viz_draft, line_dash="dash", line_color="#00f5d4", line_width=2.5,
                 annotation_text=f"Calado T = {viz_draft:.2f}m", annotation_position="bottom right"
@@ -972,10 +1016,10 @@ else:
 
             fig.update_layout(
                 title="Plano de Linhas do Alto / Perfil (Sheer Plan - Vista Lateral)",
-                xaxis_title="Comprimento Longitudinal X (m) [Popa=0 → Proa=L]",
-                yaxis_title="Cota Vertical Z (m)",
-                template="plotly_dark", height=480, margin=dict(l=20, r=20, t=40, b=20),
-                legend=dict(orientation="h", yanchor="bottom", y=-0.35, xanchor="center", x=0.5)
+                xaxis_title="Comprimento Longitudinal X (m) [ST 00 (Popa) → ST 10 (Proa)]",
+                yaxis_title="Cota Vertical Z (m) [Linha de Base BL = 0]",
+                template="plotly_dark", height=500, margin=dict(l=25, r=25, t=45, b=25),
+                legend=dict(orientation="h", yanchor="bottom", y=-0.38, xanchor="center", x=0.5)
             )
             return fig
 
