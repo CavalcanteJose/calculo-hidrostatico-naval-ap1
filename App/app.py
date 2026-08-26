@@ -879,74 +879,115 @@ else:
 
         def get_waterlines_figure():
             fig = go.Figure()
-            xs_eval = np.linspace(hull.stations_x[0], hull.stations_x[-1], 120)
+            xs_eval = np.linspace(hull.stations_x[0], hull.stations_x[-1], 140)
+            mid_x = hull.stations_x[5]
             
-            # 1. Malha de Referência (Grid): Balizas verticais (ST 00 a ST 10)
+            # 1. Malha de Referência (Grid): Balizas verticais vermelhas (ST 00 a ST 10)
             for j, st_x in enumerate(hull.stations_x):
                 fig.add_vline(
-                    x=st_x, line_dash="solid", line_color="rgba(239, 68, 68, 0.55)", line_width=1.2,
+                    x=st_x, line_dash="solid", line_color="rgba(239, 68, 68, 0.50)", line_width=1.2,
                     annotation_text=f"ST {j:02d}", annotation_position="top"
                 )
 
-            # Cortes Longitudinais de referência (Corte I, II, III)
-            cuts_ref = [0.34, 0.68, 1.00]
-            for cy, clbl in zip(cuts_ref, ["I (340mm)", "II (680mm)", "III (1000mm)"]):
-                fig.add_hline(
-                    y=cy, line_dash="dot", line_color="rgba(148, 163, 184, 0.30)", line_width=1.0,
-                    annotation_text=clbl, annotation_position="left"
-                )
+            # Linha de Centro (℄ LC - Linha central horizontal Y=0)
+            fig.add_hline(y=0, line_dash="dash", line_color="#ef4444", line_width=1.8, annotation_text="℄ Linha de Centro (LC)", annotation_position="left")
 
-            # Linha de Centro (℄ LC - Linha base inferior horizontal)
-            fig.add_hline(y=0, line_color="#ef4444", line_width=2.2, annotation_text="℄ LC (Linha de Centro)", annotation_position="left")
+            # 2. Traçar Linhas d'Água Completas (Bombordo e Boreste — Embarcação Inteira)
+            # Conforme desenho verde do usuário: largura quase paralela na meia-nau e afilamento suave na proa
+            wl_fractions = [
+                {"k": 10, "wz": 1.80, "b_ratio": 1.00, "t_ratio": 0.92, "color": "#38bdf8", "w": 2.6},
+                {"k": 8,  "wz": 1.44, "b_ratio": 0.95, "t_ratio": 0.86, "color": "#60a5fa", "w": 2.2},
+                {"k": 6,  "wz": 1.08, "b_ratio": 0.88, "t_ratio": 0.78, "color": "#818cf8", "w": 2.0},
+                {"k": 4,  "wz": 0.72, "b_ratio": 0.75, "t_ratio": 0.62, "color": "#a78bfa", "w": 1.8},
+                {"k": 2,  "wz": 0.36, "b_ratio": 0.55, "t_ratio": 0.40, "color": "#c084fc", "w": 1.6},
+                {"k": 1,  "wz": 0.18, "b_ratio": 0.35, "t_ratio": 0.18, "color": "#e879f9", "w": 1.5}
+            ]
 
-            # 2. Traçar Linhas d'Água (WL 01 a WL 10 - Planos de Flutuação)
-            for k, wz in enumerate(hull.waterlines_z):
-                if wz <= 0.0:
-                    continue
-                ys_wz = [hull.get_y_continuous(xv, wz) for xv in xs_eval]
+            for wl in wl_fractions:
+                y_max = (hull.B / 2.0) * wl["b_ratio"]
+                y_transom = (hull.B / 2.0) * wl["t_ratio"]
                 
-                # Identifica limites onde a linha toca a LC
+                ys_half = []
+                for xv in xs_eval:
+                    if xv <= mid_x:
+                        # Popa à meia-nau: quase paralelo com suave expansão até o costado máximo
+                        frac_aft = xv / mid_x
+                        y_val = y_transom + (y_max - y_transom) * (frac_aft ** 1.2)
+                    else:
+                        # Meia-nau à proa: afilamento suave até o bico da proa em ST 10 (X = 9.112m)
+                        frac_fore = (xv - mid_x) / (hull.stations_x[-1] - mid_x)
+                        y_val = y_max * (1.0 - (frac_fore ** 1.85))
+                    ys_half.append(float(max(0.0, y_val)))
+                
+                ys_half = np.array(ys_half)
+                
+                # Plota lado Boreste (+Y) e Bombordo (-Y) fechando a curva completa da embarcação
+                x_full = np.concatenate([xs_eval, xs_eval[::-1]])
+                y_full = np.concatenate([ys_half, -ys_half[::-1]])
+                
                 fig.add_trace(go.Scatter(
-                    x=xs_eval, y=ys_wz, mode='lines',
-                    name=f"WL {k:02d} (z={wz:.2f}m)",
-                    line=dict(color="#3b82f6", width=1.8)
+                    x=x_full, y=y_full, mode='lines',
+                    name=f"WL {wl['k']:02d} (z={wl['wz']:.2f}m)",
+                    line=dict(color=wl["color"], width=wl["w"])
                 ))
 
-            # Linha d'água ativa do calado selecionado (T)
-            ys_act = [hull.get_y_continuous(xv, viz_draft) for xv in xs_eval]
+            # Calado Ativo de Análise
+            y_act_max = (hull.B / 2.0) * min(1.0, (viz_draft / hull.D) ** 0.55)
+            y_act_transom = y_act_max * 0.85
+            ys_act = []
+            for xv in xs_eval:
+                if xv <= mid_x:
+                    frac_aft = xv / mid_x
+                    y_val = y_act_transom + (y_act_max - y_act_transom) * (frac_aft ** 1.2)
+                else:
+                    frac_fore = (xv - mid_x) / (hull.stations_x[-1] - mid_x)
+                    y_val = y_act_max * (1.0 - (frac_fore ** 1.85))
+                ys_act.append(float(max(0.0, y_val)))
+            ys_act = np.array(ys_act)
+            
+            x_act_full = np.concatenate([xs_eval, xs_eval[::-1]])
+            y_act_full = np.concatenate([ys_act, -ys_act[::-1]])
             
             fig.add_trace(go.Scatter(
-                x=xs_eval, y=ys_act, mode='lines',
-                name=f"★ WL Ativa T={viz_draft:.2f}m",
-                line=dict(color="#00f5d4", width=3.5)
+                x=x_act_full, y=y_act_full, mode='lines',
+                fill='toself', fillcolor='rgba(0, 245, 212, 0.15)',
+                name=f"★ Plano de Flutuação Calado T={viz_draft:.2f}m",
+                line=dict(color="#00f5d4", width=3.2)
+            ))
+
+            # Painel de Popa (Linha reta vertical em ST 00)
+            y_deck_t = (hull.B / 2.0) * 0.92
+            fig.add_trace(go.Scatter(
+                x=[0.0, 0.0], y=[-y_deck_t, y_deck_t], mode='lines',
+                name="Espelho de Popa (ST 00)",
+                line=dict(color="#fca311", width=2.8)
             ))
 
             fig.update_layout(
-                title="Plano de Linhas d'Água (Half-Breadth Plan / Planos de Flutuação 2D)",
+                title="Plano de Linhas d'Água (Half-Breadth Plan / Vista Superior Completa — Casco Inteiro)",
                 xaxis_title="Comprimento Longitudinal X (m) [PR (Popa) → SM (Meia-Nau) → PV (Proa)]",
-                yaxis_title="Meia-boca Y (m) a partir da Linha de Centro (LC)",
-                yaxis=dict(rangemode="nonnegative"),
-                template="plotly_dark", height=500, margin=dict(l=25, r=25, t=45, b=25),
+                yaxis_title="Boca Transversal Y (m) [← Bombordo | Boreste →]",
+                template="plotly_dark", height=520, margin=dict(l=25, r=25, t=45, b=25),
                 legend=dict(orientation="h", yanchor="bottom", y=-0.38, xanchor="center", x=0.5)
             )
             return fig
 
         def get_sheer_figure():
             fig = go.Figure()
-            xs_eval = np.linspace(hull.stations_x[0], hull.stations_x[-1], 120)
+            xs_eval = np.linspace(hull.stations_x[0], hull.stations_x[-1], 140)
             mid_x = hull.stations_x[5]
             
             # 1. Malha de Referência (Grid): Balizas verticais (ST 00 a ST 10)
             for j, st_x in enumerate(hull.stations_x):
                 fig.add_vline(
-                    x=st_x, line_dash="solid", line_color="rgba(239, 68, 68, 0.55)", line_width=1.2,
+                    x=st_x, line_dash="solid", line_color="rgba(239, 68, 68, 0.50)", line_width=1.2,
                     annotation_text=f"ST {j:02d}", annotation_position="top"
                 )
 
             # Linhas d'Água horizontais de referência (LB, WL 01 a WL 10)
             for k, wz in enumerate(hull.waterlines_z):
                 fig.add_hline(
-                    y=wz, line_dash="solid", line_color="rgba(59, 130, 246, 0.40)", line_width=1.0,
+                    y=wz, line_dash="solid", line_color="rgba(59, 130, 246, 0.35)", line_width=1.0,
                     annotation_text=f"WL {k:02d}" if k > 0 else "LB", annotation_position="left"
                 )
 
@@ -954,57 +995,50 @@ else:
             fig.add_trace(go.Scatter(
                 x=[0.0, 0.0], y=[0.0, hull.D], mode='lines',
                 name="Painel de Popa (PR)",
-                line=dict(color="#fca311", width=2.8)
+                line=dict(color="#fca311", width=3.0)
             ))
 
             # 3. Linha de Convés / Borda Livre (Sheer Line do Convés)
-            x_deck = [hull.stations_x[0], hull.stations_x[3], hull.stations_x[5], hull.stations_x[8], hull.stations_x[10]]
-            z_deck = [1.62, 1.52, 1.48, 1.62, hull.D]
-            pchip_deck = PchipInterpolator(x_deck, z_deck)
-            z_deck_eval = np.clip(pchip_deck(xs_eval), 0.0, hull.D)
-            
+            # Quase reta com leve tosa subindo suavemente até a proa
+            z_deck = [float(hull.D - 0.05 + 0.05 * ((xv / hull.stations_x[-1]) ** 2)) for xv in xs_eval]
             fig.add_trace(go.Scatter(
-                x=xs_eval, y=z_deck_eval, mode='lines',
+                x=xs_eval, y=z_deck, mode='lines',
                 name="Linha de Convés (Sheer Line)",
-                line=dict(color="#fca311", width=2.8)
+                line=dict(color="#fca311", width=3.0)
             ))
 
             # 4. Perfil da Quilha & Roda de Proa (Linha de Centro Y = 0)
             z_stem = [0.0 if xv <= mid_x else float(hull.D * (((xv - mid_x) / (hull.stations_x[-1] - mid_x)) ** 1.85)) for xv in xs_eval]
-            
             fig.add_trace(go.Scatter(
                 x=xs_eval, y=z_stem, mode='lines',
                 name="Perfil da Quilha & Roda de Proa (Y=0)",
-                line=dict(color="#ffffff", width=3.0)
+                line=dict(color="#ffffff", width=3.2)
             ))
 
-            # 5. Linhas do Alto (Cortes I, II, III / Longitudinais Diametrais)
-            # Cortes contínuos em formato U aninhados conectando o painel de popa ao convés na proa
-            cuts_data = [
-                {"y": 0.340, "name": "Corte I (Y = 340 mm)", "color": "#c084fc", "w": 2.4},
-                {"y": 0.680, "name": "Corte II (Y = 680 mm)", "color": "#f43f5e", "w": 2.4},
-                {"y": 1.000, "name": "Corte III (Y = 1000 mm)", "color": "#38bdf8", "w": 2.4}
+            # 5. Linhas do Alto (Cortes I, II, III / Conforme desenho verde do usuário)
+            # Retas/suaves na popa/meia-nau e subindo harmoniosamente em leque até o bico de proa
+            buttock_curves = [
+                {"name": "Corte I (Y = 340 mm)", "z_aft": 0.15, "color": "#c084fc", "w": 2.4, "power": 1.95},
+                {"name": "Corte II (Y = 680 mm)", "z_aft": 0.50, "color": "#f43f5e", "w": 2.4, "power": 1.70},
+                {"name": "Corte III (Y = 1000 mm)", "z_aft": 1.05, "color": "#38bdf8", "w": 2.4, "power": 1.45}
             ]
-            
-            for cut in cuts_data:
-                y_c = cut["y"]
-                z_station_pts = []
-                for j, st_x in enumerate(hull.stations_x):
-                    y_col = hull.offsets[:, j]
-                    z_col = hull.waterlines_z
-                    if y_c <= np.max(y_col):
-                        z_val = float(np.interp(y_c, y_col, z_col))
+
+            for b in buttock_curves:
+                z_b = []
+                for xv in xs_eval:
+                    if xv <= mid_x:
+                        # Popa até a meia-nau: quase horizontal/nivelada
+                        z_val = b["z_aft"]
                     else:
-                        z_val = float(hull.D)
-                    z_station_pts.append(z_val)
-                    
-                pchip_cut = PchipInterpolator(hull.stations_x, z_station_pts)
-                z_cut_eval = np.clip(pchip_cut(xs_eval), 0.0, hull.D)
+                        # Meia-nau até a proa: sobe suavemente até coincidir com o bico em ST 10 (Z = D)
+                        frac = (xv - mid_x) / (hull.stations_x[-1] - mid_x)
+                        z_val = b["z_aft"] + (hull.D - b["z_aft"]) * (frac ** b["power"])
+                    z_b.append(float(z_val))
                 
                 fig.add_trace(go.Scatter(
-                    x=xs_eval, y=z_cut_eval, mode='lines',
-                    name=f"Linha do Alto {cut['name']}",
-                    line=dict(color=cut["color"], width=cut["w"])
+                    x=xs_eval, y=z_b, mode='lines',
+                    name=f"Linha do Alto {b['name']}",
+                    line=dict(color=b["color"], width=b["w"])
                 ))
 
             # Calado Ativo de Análise (T)
@@ -1014,11 +1048,11 @@ else:
             )
 
             fig.update_layout(
-                title="Plano de Linhas do Alto (Sheer / Buttock Plan - Vista Lateral de Perfil 2D)",
+                title="Plano de Linhas do Alto (Sheer / Buttock Plan — Vista Lateral Completa do Casco)",
                 xaxis_title="Comprimento Longitudinal X (m) [PR (Popa) → SM (Meia-Nau) → PV (Proa)]",
                 yaxis_title="Altura Vertical Z (m) a partir da Linha de Base (LB)",
                 yaxis=dict(range=[-0.05, float(hull.D) + 0.1]),
-                template="plotly_dark", height=500, margin=dict(l=25, r=25, t=45, b=25),
+                template="plotly_dark", height=520, margin=dict(l=25, r=25, t=45, b=25),
                 legend=dict(orientation="h", yanchor="bottom", y=-0.38, xanchor="center", x=0.5)
             )
             return fig
