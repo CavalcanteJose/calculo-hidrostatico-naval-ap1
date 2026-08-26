@@ -107,7 +107,9 @@ if "app_state" not in st.session_state:
 if "selected_module" not in st.session_state:
     st.session_state.selected_module = "📋 Tabela de Cotas"
 if "ship_name" not in st.session_state:
-    st.session_state.ship_name = "Barcaça Analítica"
+    st.session_state.ship_name = "Lancha Salva-Vidas (Projeto Real AP1.1)"
+if "df_offsets" not in st.session_state:
+    st.session_state.df_offsets = None
 
 
 # ==============================================================================
@@ -817,10 +819,19 @@ if st.session_state.app_state == "home":
 # TELA 2: PAINEL DE ANÁLISE (MODULAR VIA BOTÕES COM ESPAÇAMENTO PERFEITO)
 # ==============================================================================
 else:
-    df_offsets = st.session_state.get("df_offsets", generate_barge_data())
+    df_offsets = st.session_state.get("df_offsets", None)
+    if df_offsets is None or not isinstance(df_offsets, pd.DataFrame):
+        df_offsets = generate_real_ship()
+        st.session_state.df_offsets = df_offsets
+
+    lbp_val = float(st.session_state.get("lbp", 7.20))
+    beam_val = float(st.session_state.get("beam", 2.04))
+    depth_val = float(st.session_state.get("depth", 1.80))
+    design_draft_val = float(st.session_state.get("design_draft", 0.60))
+
     hull = Hull(
         df_offsets.columns, df_offsets.index, df_offsets.values,
-        st.session_state.lbp, st.session_state.beam, st.session_state.depth, st.session_state.design_draft
+        lbp_val, beam_val, depth_val, design_draft_val
     )
     
     # BANNER SUPERIOR DE IDENTIFICAÇÃO COM ESPAÇAMENTO APROPRIADO
