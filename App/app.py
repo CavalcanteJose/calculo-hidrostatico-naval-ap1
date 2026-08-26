@@ -111,29 +111,178 @@ if "ship_name" not in st.session_state:
 
 
 # ==============================================================================
-# 0. LEITOR INTELIGENTE E ROBUSTO DE TABELAS DE COTAS (SUPORTE A CABEÇALHOS)
+# 0. PARSERS INTELIGENTES DE PLANILHAS (TABELA DE COTAS E PLANO DE LINHAS)
 # ==============================================================================
 def extract_numeric_value(val, default=0.0):
-    """Extrai número de qualquer texto (ex: 'Estação 10.5m' -> 10.5, '1,25' -> 1.25)."""
-    if pd.isna(val):
+    """Extrai número de qualquer texto (ex: '1,25 m' -> 1.25, 'Trans 8090' -> 8090)."""
+    if val is None:
         return default
+    try:
+        if pd.isna(val):
+            return default
+    except Exception:
+        pass
     if isinstance(val, (int, float)):
         return float(val)
     s = str(val).strip().replace(',', '.')
     match = re.search(r"[-+]?(?:\d*\.\d+|\d+)", s)
-    if match:
-        return float(match.group(0))
-    return default
+    return float(match.group(0)) if match else default
+
+
+def _is_body_plan_format(raw_df):
+    """Detecta se é Plano de Linhas com colunas Trans/Vert (não tabela de cotas padrão)."""
+    flat = raw_df.astype(str).values.flatten()
+    keywords = ["trans", "vert", "m-cl", "m-bl", "linhas", "plano", "x(m-ap)"]
+    hits = sum(1 for c in flat if any(k in str(c).lower() for k in keywords))
+    return hits >= 2
+
+
+def parse_body_plan_to_offset_table(raw_df):
+    """
+    Converte Plano de Linhas (Trans/Vert em mm por estação) em Tabela de Cotas padrão.
+
+    Formato esperado:
+      - Cabeçalho com "X(m-AP)" seguido da posição da estação em mm
+      - 3 colunas por estação: [No., Trans(mm desde CL), Vert(mm desde BL)]
+      - Valores em milímetros
+
+    Retorna DataFrame com:
+      - Índice = Linhas d'Água Z em metros
+      - Colunas = Estações X em metros
+      - Valores = Semi-bocas Y em metros
+    """
+    # 1. Localizar posições X das estações no cabeçalho
+    station_x_mm = []
+    station_x_col = {}
+
+    for ci in range(raw_df.shape[1]):
+        for ri in range(min(7, raw_df.shape[0])):
+            cell = str(raw_df.iloc[ri, ci]).strip().lower()
+            if re.match(r"x\s*\(m-ap\)", cell):
+                # Valor da estação na próxima coluna (mesma linha ou próxima)
+                for di in [1, 0]:
+                    if ci + di < raw_df.shape[1]:
+                        xv = extract_numeric_value(raw_df.iloc[ri, ci + di], default=None)
+                        if xv and xv > 0:
+                            if xv not in station_x_mm:
+                                station_x_mm.append(xv)
+                                station_x_col[xv] = ci + di
+                            break
+
+    # Fallback: busca números grandes seguidos de "Trans" na linha seguinte
+    if not station_x_mm:
+        for ci in range(raw_df.shape[1]):
+            for ri in range(min(5, raw_df.shape[0])):
+                xv = extract_numeric_value(raw_df.iloc[ri, ci], default=0)
+                if 50 < xv < 50000:
+                    # Verifica se coluna seguinte contém "Trans"
+                    if ci + 1 < raw_df.shape[1]:
+                        next_col_text = " ".join(
+                            str(raw_df.iloc[r, ci + 1]).lower()
+                            for r in range(min(6, raw_df.shape[0]))
+                        )
+                        if "trans" in next_col_text and xv not in station_x_mm:
+                            station_x_mm.append(xv)
+                            station_x_col[xv] = ci
+
+    if not station_x_mm:
+        raise ValueError(
+            "Não foi possível identificar as estações X.\n"
+            "Certifique-se que a planilha contém cabeçalhos 'X(m-AP)' com os valores das estações."
+        )
+
+    # 2. Encontrar linha inicial dos dados numéricos
+    data_start_row = 4  # padrão: linha 4 (após título + 3 linhas de cabeçalho)
+    for ri in range(min(10, raw_df.shape[0])):
+        v = str(raw_df.iloc[ri, 0]).strip()
+        if v in ('1', '1.0', '1,0'):
+            data_start_row = ri
+            break
+
+    # 3. Para cada estação, localizar colunas Trans e Vert e extrair pontos
+    station_points = {}
+
+    for x_mm in station_x_mm:
+        x_col = station_x_col[x_mm]
+        trans_col = vert_col = None
+
+        # Procura "Trans" e "Vert" nas linhas de cabeçalho próximas a x_col
+        search_cols = range(max(0, x_col - 1), min(raw_df.shape[1], x_col + 4))
+        for ci in search_cols:
+            col_text = " ".join(
+                str(raw_df.iloc[ri, ci]).lower()
+                for ri in range(min(7, raw_df.shape[0]))
+            )
+            if "trans" in col_text and trans_col is None:
+                trans_col = ci
+            if "vert" in col_text and vert_col is None:
+                vert_col = ci
+
+        # Fallback: Trans = x_col+1, Vert = x_col+2
+        if trans_col is None:
+            trans_col = x_col + 1 if x_col + 1 < raw_df.shape[1] else None
+        if vert_col is None:
+            vert_col = x_col + 2 if x_col + 2 < raw_df.shape[1] else None
+
+        if trans_col is None or vert_col is None:
+            continue
+
+        points = []
+        for ri in range(data_start_row, raw_df.shape[0]):
+            t = extract_numeric_value(raw_df.iloc[ri, trans_col], default=None)
+            v = extract_numeric_value(raw_df.iloc[ri, vert_col], default=None)
+            if t is not None and v is not None and t > 0 and v >= 0:
+                points.append((t / 1000.0, v / 1000.0))  # mm → m
+
+        if points:
+            x_m = x_mm / 1000.0
+            station_points[x_m] = sorted(points, key=lambda p: p[1])
+
+    if not station_points:
+        raise ValueError(
+            "Nenhum ponto (Trans, Vert) válido encontrado.\n"
+            "Verifique se os dados numéricos estão nas colunas corretas."
+        )
+
+    # 4. Criar grade de Linhas d'Água e interpolar semi-bocas
+    all_z = [v for pts in station_points.values() for (_, v) in pts]
+    z_grid = np.linspace(min(all_z), max(all_z), 12)
+    x_sorted = sorted(station_points.keys())
+    matrix = np.zeros((len(z_grid), len(x_sorted)))
+
+    for j, x_m in enumerate(x_sorted):
+        pts = station_points[x_m]
+        z_arr = np.array([p[1] for p in pts])
+        y_arr = np.array([p[0] for p in pts])
+        # Ordenar e remover Z duplicados
+        sidx = np.argsort(z_arr)
+        z_arr, y_arr = z_arr[sidx], y_arr[sidx]
+        _, uidx = np.unique(z_arr, return_index=True)
+        z_arr, y_arr = z_arr[uidx], y_arr[uidx]
+        if len(z_arr) >= 2:
+            f = interp1d(z_arr, y_arr, kind='linear',
+                         fill_value=(y_arr[0], y_arr[-1]), bounds_error=False)
+            matrix[:, j] = np.maximum(0, f(z_grid))
+
+    df_result = pd.DataFrame(
+        np.round(matrix, 4),
+        index=np.round(z_grid, 4),
+        columns=np.round(x_sorted, 4)
+    )
+    df_result.index.name = "Z_WL (m)"
+    df_result.columns.name = "Estações X (m)"
+    return df_result
 
 
 def smart_parse_offset_table(uploaded_file):
     """
-    Lê planilhas Excel (.xlsx, .xls) ou CSV com suporte total a cabeçalhos de texto,
-    vírgulas decimais, células vazias e formatações personalizadas.
+    Parser universal: detecta automaticamente o formato da planilha.
+      - Formato A: Tabela de Cotas padrão (Z × X com semi-bocas Y)
+      - Formato B: Plano de Linhas (Trans/Vert em mm por estação)
     """
     file_name = uploaded_file.name.lower()
-    
-    # 1. Leitura do arquivo bruto
+
+    # Leitura bruta do arquivo
     if file_name.endswith(".csv"):
         try:
             raw_df = pd.read_csv(uploaded_file, header=None)
@@ -143,43 +292,40 @@ def smart_parse_offset_table(uploaded_file):
     else:
         raw_df = pd.read_excel(uploaded_file, header=None)
 
-    # Remove linhas e colunas 100% vazias
     raw_df = raw_df.dropna(how="all").dropna(axis=1, how="all")
-    
+
     if raw_df.empty:
         raise ValueError("A planilha carregada está vazia.")
 
-    # 2. Identificar a linha de cabeçalho das Estações (X) e a coluna das Linhas d'Água (Z)
-    start_row = 1
-    start_col = 1
-    
-    # Tenta achar o cabeçalho na linha 0
-    col_labels = raw_df.iloc[0, start_col:].values
-    stations_x = []
-    for idx, col_val in enumerate(col_labels):
-        num = extract_numeric_value(col_val, default=float(idx))
-        stations_x.append(num)
-        
-    # Tenta achar os índices de linhas d'água na coluna 0
-    row_labels = raw_df.iloc[start_row:, 0].values
-    waterlines_z = []
-    for idx, row_val in enumerate(row_labels):
-        num = extract_numeric_value(row_val, default=float(idx * 0.5))
-        waterlines_z.append(num)
+    # Detecção automática de formato
+    if _is_body_plan_format(raw_df):
+        df_result = parse_body_plan_to_offset_table(raw_df)
+        return df_result
 
-    # 3. Extrair matriz de semi-bocas numéricas
+    # --- Formato A: Tabela de Cotas padrão ---
+    start_row, start_col = 1, 1
+
+    col_labels = raw_df.iloc[0, start_col:].values
+    stations_x = [extract_numeric_value(v, float(i)) for i, v in enumerate(col_labels)]
+
+    row_labels = raw_df.iloc[start_row:, 0].values
+    waterlines_z = [extract_numeric_value(v, float(i) * 0.5) for i, v in enumerate(row_labels)]
+
     data_matrix = raw_df.iloc[start_row:, start_col:].values
-    cleaned_matrix = np.zeros(data_matrix.shape, dtype=float)
-    
+    cleaned = np.zeros(data_matrix.shape, dtype=float)
     for r in range(data_matrix.shape[0]):
         for c in range(data_matrix.shape[1]):
-            cleaned_matrix[r, c] = extract_numeric_value(data_matrix[r, c], default=0.0)
+            cleaned[r, c] = extract_numeric_value(data_matrix[r, c], 0.0)
 
-    # 4. Criar DataFrame limpo e formatado
-    df_clean = pd.DataFrame(cleaned_matrix, index=waterlines_z, columns=stations_x)
+    # Conversão automática mm → m quando valores são muito grandes
+    if np.nanmax(cleaned) > 100:
+        cleaned = cleaned / 1000.0
+        stations_x = [x / 1000.0 if x > 100 else x for x in stations_x]
+        waterlines_z = [z / 1000.0 if z > 50 else z for z in waterlines_z]
+
+    df_clean = pd.DataFrame(cleaned, index=waterlines_z, columns=stations_x)
     df_clean.index.name = "Z_WL (m)"
     df_clean.columns.name = "Estações X (m)"
-    
     return df_clean
 
 
@@ -312,6 +458,58 @@ def generate_sample_ship():
     return df
 
 
+def generate_real_ship():
+    """
+    Lancha Salva-Vidas (Jaraqui Nautidesign) — Projeto Oficial AP1.1
+    Dimensões Oficiais do Desenho Técnico (PDF):
+      - Comprimento Total (LOA): 9,112 m (10 intervalos de 0,9112 m de ST 00 a ST 10)
+      - Comprimento Entre Perpendiculares (LBP): 7,200 m
+      - Boca Moldada (B): 2,040 m (Meia-boca máxima = 1,020 m)
+      - Pontal Moldado (D): 1,800 m
+      - Calado de Projeto (Td): 0,60 m
+    """
+    # 11 Estações X (0 a 10) espaçadas em 0.9112m
+    xs = np.array([0.0000, 0.9112, 1.8224, 2.7336, 3.6448, 4.5560, 5.4672, 6.3784, 7.2896, 8.2008, 9.1120])
+    
+    # 11 Linhas d'Água Z (WL 0 a WL 10) de 0.00m até o Pontal 1.80m
+    zs = np.array([0.00, 0.18, 0.36, 0.54, 0.72, 0.90, 1.08, 1.26, 1.44, 1.62, 1.80])
+
+    # Matriz de Meias-Bocas Y (em metros)
+    # Colunas: ST00 (Popa) -> ST05 (Meia-Nau) -> ST10 (Proa)
+    # Boca máxima de 2.040m -> Meia-boca máxima de 1.020m
+    data = [
+        # WL00 (z = 0.00m - Linha de Base)
+        [0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000],
+        # WL01 (z = 0.18m)
+        [0.320, 0.360, 0.390, 0.410, 0.400, 0.380, 0.340, 0.280, 0.190, 0.080, 0.000],
+        # WL02 (z = 0.36m)
+        [0.550, 0.610, 0.660, 0.690, 0.700, 0.680, 0.630, 0.530, 0.390, 0.180, 0.000],
+        # WL03 (z = 0.54m)
+        [0.720, 0.780, 0.830, 0.860, 0.870, 0.860, 0.810, 0.710, 0.550, 0.280, 0.000],
+        # WL04 (z = 0.72m)
+        [0.820, 0.870, 0.920, 0.950, 0.960, 0.950, 0.910, 0.820, 0.670, 0.370, 0.000],
+        # WL05 (z = 0.90m)
+        [0.870, 0.920, 0.960, 0.990, 1.000, 0.990, 0.960, 0.880, 0.750, 0.450, 0.000],
+        # WL06 (z = 1.08m)
+        [0.900, 0.940, 0.980, 1.010, 1.015, 1.010, 0.980, 0.920, 0.810, 0.520, 0.000],
+        # WL07 (z = 1.26m)
+        [0.915, 0.955, 0.990, 1.015, 1.020, 1.018, 0.995, 0.945, 0.850, 0.580, 0.000],
+        # WL08 (z = 1.44m)
+        [0.925, 0.965, 0.998, 1.018, 1.020, 1.020, 1.005, 0.965, 0.885, 0.630, 0.000],
+        # WL09 (z = 1.62m)
+        [0.930, 0.970, 1.002, 1.020, 1.020, 1.020, 1.012, 0.980, 0.915, 0.675, 0.000],
+        # WL10 (z = 1.80m - Convés / Borda Livre)
+        [0.935, 0.975, 1.005, 1.020, 1.020, 1.020, 1.018, 0.995, 0.940, 0.715, 0.000],
+    ]
+
+    df = pd.DataFrame(data, index=zs, columns=xs)
+    df.index.name = "Z_WL (m)"
+    df.columns.name = "Estações X (m)"
+    return df
+
+
+
+
 # ==============================================================================
 # 3. MOTOR HIDROSTÁTICO (Itens 10 a 19 do Edital)
 # ==============================================================================
@@ -438,7 +636,12 @@ if st.session_state.app_state == "home":
         
         origin_choice = st.radio(
             "Origem dos Dados:",
-            ["🧱 Barcaça Paralelepipédica (Validação Analítica)", "🚢 Navio Mercante 100m (Exemplo Realista)", "📁 Fazer Upload de Tabela de Cotas (.xlsx / .csv)"],
+            [
+                "🧱 Barcaça Paralelepipédica (Validação Analítica)",
+                "🚢 Navio Mercante 100m (Exemplo Realista)",
+                "⛵ Navio Real — Tabela de Cotas (11 Balizas × 11 WL)",
+                "📁 Fazer Upload de Tabela de Cotas (.xlsx / .csv)"
+            ],
             index=0
         )
         
@@ -458,9 +661,13 @@ if st.session_state.app_state == "home":
         elif origin_choice == "🚢 Navio Mercante 100m (Exemplo Realista)":
             st.session_state.df_offsets = generate_sample_ship()
             st.session_state.ship_name = "Navio Mercante 100m"
+        elif origin_choice == "⛵ Navio Real — Tabela de Cotas (11 Balizas × 11 WL)":
+            st.session_state.df_offsets = generate_real_ship()
+            st.session_state.ship_name = "Navio Real (9.11m × 2.40m × 1.06m)"
         else:
             st.session_state.df_offsets = generate_barge_data(20.0, 4.0, 2.0, 11, 6)
             st.session_state.ship_name = "Barcaça Analítica"
+
             
         st.markdown('</div>', unsafe_allow_html=True)
         
@@ -470,9 +677,11 @@ if st.session_state.app_state == "home":
         st.caption("Verifique as dimensões principais e a densidade da água.")
         
         df_curr = st.session_state.get("df_offsets", generate_barge_data())
-        calc_lbp = float(df_curr.columns[-1]) - float(df_curr.columns[0])
-        calc_beam = float(2.0 * df_curr.values.max())
-        calc_depth = float(df_curr.index[-1])
+        # Clamp valores para garantir que estejam acima dos mínimos dos widgets
+        calc_lbp = max(1.0, float(df_curr.columns[-1]) - float(df_curr.columns[0]))
+        calc_beam = max(0.5, float(2.0 * df_curr.values.max()))
+        calc_depth = max(0.5, float(df_curr.index[-1]))
+        calc_td = max(0.1, float(calc_depth * 0.7))
         
         col_p1, col_p2 = st.columns(2)
         st.session_state.lbp = col_p1.number_input("LBP (m)", value=calc_lbp, min_value=1.0, step=1.0)
@@ -480,7 +689,7 @@ if st.session_state.app_state == "home":
         
         col_p3, col_p4 = st.columns(2)
         st.session_state.depth = col_p3.number_input("Pontal D (m)", value=calc_depth, min_value=0.5, step=0.5)
-        st.session_state.design_draft = col_p4.number_input("Calado Proj. Td (m)", value=float(calc_depth * 0.7), min_value=0.1, step=0.1)
+        st.session_state.design_draft = col_p4.number_input("Calado Proj. Td (m)", value=calc_td, min_value=0.1, step=0.1)
         
         st.session_state.density = st.number_input("Densidade da Água ρ (t/m³)", value=1.025, min_value=0.5, max_value=1.5, step=0.001, format="%.3f")
         
@@ -577,46 +786,235 @@ else:
 
     # 2. CASCO 2D & 3D
     elif st.session_state.selected_module == "📐 Casco 2D & 3D":
-        st.subheader("📐 Reconstrução Geométrica Interativa")
-        viz_draft = st.slider("🌊 Calado Analisado no Gráfico (m):", min_value=0.1, max_value=float(hull.D), value=float(hull.Td), step=0.05)
+        st.subheader("📐 Reconstrução Geométrica e Plano de Linhas Naval (2D & 3D)")
         
-        col_v1, col_v2 = st.columns([1, 1])
-        
-        with col_v1:
-            st.markdown("#### Plano de Balizas (Body Plan)")
-            fig_bp = go.Figure()
-            for j, x in enumerate(hull.stations_x):
-                z_pts = np.linspace(hull.waterlines_z[0], hull.D, 30)
-                y_pts = [hull.get_y(j, z) for z in z_pts]
-                fig_bp.add_trace(go.Scatter(x=y_pts, y=z_pts, mode='lines', name=f"x={x:.1f}m", line=dict(width=1.5)))
-                fig_bp.add_trace(go.Scatter(x=[-v for v in y_pts], y=z_pts, mode='lines', showlegend=False, line=dict(dash='dot', width=1.2)))
-            
-            fig_bp.add_hline(y=viz_draft, line_dash="dash", line_color="#48cae4", line_width=2.5, annotation_text=f"T = {viz_draft:.2f} m", annotation_position="top right")
-            fig_bp.update_layout(
-                xaxis_title="Semi-boca Y (m)", yaxis_title="Cota Vertical Z (m)",
-                template="plotly_dark", height=460, margin=dict(l=20, r=20, t=20, b=20)
+        col_ctrl1, col_ctrl2 = st.columns([2, 3])
+        with col_ctrl1:
+            viz_draft = st.slider("🌊 Calado Analisado nas Vistas (m):", min_value=0.05, max_value=float(hull.D), value=float(hull.Td), step=0.05)
+        with col_ctrl2:
+            view_2d_choice = st.radio(
+                "🧭 Selecione a Vista 2D para Exibição:",
+                [
+                    "⚓ Plano de Balizas (Body Plan - Vante/Ré)",
+                    "🌊 Plano de Linhas d'Água (Waterlines)",
+                    "📐 Plano de Linhas do Alto / Perfil (Sheer)",
+                    "📑 Vista Completa (Tríptico Naval 2D)"
+                ],
+                horizontal=True
             )
-            st.plotly_chart(fig_bp, use_container_width=True)
+
+        st.write("")
+        col_v1, col_v2 = st.columns([1.2, 1])
+
+        # ----------------------------------------------------------------------
+        # FUNÇÕES GERADORAS DOS PLANOS 2D
+        # ----------------------------------------------------------------------
+        def get_body_plan_figure():
+            fig = go.Figure()
+            mid_idx = len(hull.stations_x) // 2
             
+            # Linhas de grade das Linhas d'Água horizontais
+            for wz in hull.waterlines_z:
+                fig.add_hline(y=wz, line_dash="dot", line_color="rgba(148, 163, 184, 0.25)", line_width=1)
+                
+            # Eixo de Simetria (Linha de Centro - CL)
+            fig.add_vline(x=0, line_color="#48cae4", line_width=1.8, annotation_text="CL", annotation_position="top")
+
+            # Balizas de Vante (Proa - Lado Direito +Y)
+            for j in range(mid_idx, len(hull.stations_x)):
+                x_val = hull.stations_x[j]
+                z_pts = np.linspace(hull.waterlines_z[0], hull.D, 40)
+                y_pts = [hull.get_y(j, z) for z in z_pts]
+                fig.add_trace(go.Scatter(
+                    x=y_pts, y=z_pts, mode='lines',
+                    name=f"ST {j} (x={x_val:.2f}m - Proa)",
+                    line=dict(width=1.8)
+                ))
+
+            # Balizas de Ré (Popa - Lado Esquerdo -Y)
+            for j in range(0, mid_idx + 1):
+                x_val = hull.stations_x[j]
+                z_pts = np.linspace(hull.waterlines_z[0], hull.D, 40)
+                y_pts = [-hull.get_y(j, z) for z in z_pts]
+                fig.add_trace(go.Scatter(
+                    x=y_pts, y=z_pts, mode='lines',
+                    name=f"ST {j} (x={x_val:.2f}m - Popa)",
+                    line=dict(dash='dash' if j < mid_idx else 'solid', width=1.8)
+                ))
+
+            # Linha d'Água de Análise
+            fig.add_hline(
+                y=viz_draft, line_dash="dash", line_color="#00f5d4", line_width=2.5,
+                annotation_text=f"Calado T = {viz_draft:.2f}m", annotation_position="top right"
+            )
+            
+            fig.update_layout(
+                title="Plano de Balizas (Body Plan) — [Esquerda: Popa | Direita: Proa]",
+                xaxis_title="Semi-boca Y (m) [← Bombordo | Boreste →]",
+                yaxis_title="Cota Vertical Z (m) [Linha de Base BL = 0]",
+                template="plotly_dark", height=480, margin=dict(l=20, r=20, t=40, b=20),
+                legend=dict(orientation="h", yanchor="bottom", y=-0.35, xanchor="center", x=0.5)
+            )
+            return fig
+
+        def get_waterlines_figure():
+            fig = go.Figure()
+            xs_dense = np.linspace(hull.stations_x[0], hull.stations_x[-1], 60)
+            
+            # Estações como linhas verticais
+            for j, st_x in enumerate(hull.stations_x):
+                fig.add_vline(x=st_x, line_dash="dot", line_color="rgba(148, 163, 184, 0.25)", line_width=1)
+
+            # Linhas d'água existentes
+            for wz in hull.waterlines_z:
+                ys_wz = []
+                for x_val in xs_dense:
+                    # Encontra índice da estação mais próxima e interpola
+                    st_idx = np.searchsorted(hull.stations_x, x_val, side='right') - 1
+                    st_idx = max(0, min(st_idx, len(hull.stations_x) - 1))
+                    ys_wz.append(hull.get_y(st_idx, wz))
+                    
+                fig.add_trace(go.Scatter(
+                    x=xs_dense, y=ys_wz, mode='lines',
+                    name=f"WL z={wz:.2f}m", line=dict(width=1.4)
+                ))
+                fig.add_trace(go.Scatter(
+                    x=xs_dense, y=[-v for v in ys_wz], mode='lines',
+                    showlegend=False, line=dict(width=1.2, dash='dot')
+                ))
+
+            # Linha d'água ativa em destaque
+            ys_active = [hull.get_y(max(0, min(np.searchsorted(hull.stations_x, xv, side='right')-1, len(hull.stations_x)-1)), viz_draft) for xv in xs_dense]
+            fig.add_trace(go.Scatter(
+                x=xs_dense, y=ys_active, mode='lines',
+                name=f"★ WL Ativa T={viz_draft:.2f}m",
+                line=dict(color="#00f5d4", width=3.0)
+            ))
+            fig.add_trace(go.Scatter(
+                x=xs_dense, y=[-v for v in ys_active], mode='lines',
+                showlegend=False, line=dict(color="#00f5d4", width=2.5, dash='dash')
+            ))
+
+            fig.add_hline(y=0, line_color="#48cae4", line_width=1.5, annotation_text="CL", annotation_position="left")
+
+            fig.update_layout(
+                title="Plano de Linhas d'Água (Waterlines / Vista Superior)",
+                xaxis_title="Comprimento Longitudinal X (m) [Popa=0 → Proa=L]",
+                yaxis_title="Semi-boca Y (m)",
+                template="plotly_dark", height=480, margin=dict(l=20, r=20, t=40, b=20),
+                legend=dict(orientation="h", yanchor="bottom", y=-0.35, xanchor="center", x=0.5)
+            )
+            return fig
+
+        def get_sheer_figure():
+            fig = go.Figure()
+            
+            # Estações como linhas verticais
+            for j, st_x in enumerate(hull.stations_x):
+                fig.add_vline(x=st_x, line_dash="dot", line_color="rgba(148, 163, 184, 0.25)", line_width=1,
+                              annotation_text=f"ST{j}", annotation_position="top")
+
+            # Linhas d'Água como horizontais
+            for wz in hull.waterlines_z:
+                fig.add_hline(y=wz, line_dash="dot", line_color="rgba(148, 163, 184, 0.25)", line_width=1)
+
+            # Cortes Longitudinais / Linhas do Alto (Buttocks A, B, C a distâncias Y constantes)
+            xs_dense = np.linspace(hull.stations_x[0], hull.stations_x[-1], 60)
+            cuts_y = [hull.B * 0.15, hull.B * 0.30, hull.B * 0.45]
+            cut_names = ["Corte A (Y=15% B)", "Corte B (Y=30% B)", "Corte C (Y=45% B)"]
+            
+            for y_target, c_name in zip(cuts_y, cut_names):
+                z_buttock = []
+                for xv in xs_dense:
+                    st_idx = max(0, min(np.searchsorted(hull.stations_x, xv, side='right') - 1, len(hull.stations_x) - 1))
+                    # Encontra cota Z onde a semi-boca atinge y_target
+                    z_eval = np.linspace(hull.waterlines_z[0], hull.D, 50)
+                    y_eval = np.array([hull.get_y(st_idx, zi) for zi in z_eval])
+                    if np.max(y_eval) >= y_target:
+                        valid_z = z_eval[y_eval >= y_target]
+                        z_buttock.append(float(valid_z[0]) if len(valid_z) > 0 else np.nan)
+                    else:
+                        z_buttock.append(np.nan)
+                
+                fig.add_trace(go.Scatter(
+                    x=xs_dense, y=z_buttock, mode='lines',
+                    name=f"Linha do Alto {c_name} (y={y_target:.2f}m)",
+                    line=dict(width=2.0)
+                ))
+
+            # Linha de Contorno do Convés (Deck/Sheer line)
+            deck_z = np.full_like(xs_dense, hull.D)
+            fig.add_trace(go.Scatter(
+                x=xs_dense, y=deck_z, mode='lines',
+                name=f"Linha de Borda Livre / Convés (z={hull.D:.2f}m)",
+                line=dict(color="#fca311", width=2.5)
+            ))
+
+            # Calado Ativo
+            fig.add_hline(
+                y=viz_draft, line_dash="dash", line_color="#00f5d4", line_width=2.5,
+                annotation_text=f"Calado T = {viz_draft:.2f}m", annotation_position="bottom right"
+            )
+
+            fig.update_layout(
+                title="Plano de Linhas do Alto / Perfil (Sheer Plan - Vista Lateral)",
+                xaxis_title="Comprimento Longitudinal X (m) [Popa=0 → Proa=L]",
+                yaxis_title="Cota Vertical Z (m)",
+                template="plotly_dark", height=480, margin=dict(l=20, r=20, t=40, b=20),
+                legend=dict(orientation="h", yanchor="bottom", y=-0.35, xanchor="center", x=0.5)
+            )
+            return fig
+
+        # ----------------------------------------------------------------------
+        # EXIBIÇÃO NO PAINEL PRINCIPAL
+        # ----------------------------------------------------------------------
+        with col_v1:
+            if view_2d_choice == "⚓ Plano de Balizas (Body Plan - Vante/Ré)":
+                st.plotly_chart(get_body_plan_figure(), use_container_width=True)
+            elif view_2d_choice == "🌊 Plano de Linhas d'Água (Waterlines)":
+                st.plotly_chart(get_waterlines_figure(), use_container_width=True)
+            elif view_2d_choice == "📐 Plano de Linhas do Alto / Perfil (Sheer)":
+                st.plotly_chart(get_sheer_figure(), use_container_width=True)
+            else:
+                st.markdown("##### 1. Plano de Balizas (Body Plan)")
+                st.plotly_chart(get_body_plan_figure(), use_container_width=True)
+                st.markdown("##### 2. Plano de Linhas d'Água (Waterlines)")
+                st.plotly_chart(get_waterlines_figure(), use_container_width=True)
+                st.markdown("##### 3. Plano de Linhas do Alto (Perfil)")
+                st.plotly_chart(get_sheer_figure(), use_container_width=True)
+
         with col_v2:
-            st.markdown("#### Casco Tridimensional (3D Mesh)")
+            st.markdown("#### Casco Tridimensional (3D Mesh Interativo)")
             x_mesh, y_mesh, z_mesh = [], [], []
             for z_val in hull.waterlines_z:
-                xs_d = np.linspace(hull.stations_x[0], hull.stations_x[-1], 25)
-                ys_d = [hull.get_y(np.searchsorted(hull.stations_x, x_val, side='right')-1, z_val) for x_val in xs_d]
-                x_mesh.append(xs_d); y_mesh.append(ys_d); z_mesh.append(np.full_like(xs_d, z_val))
+                xs_d = np.linspace(hull.stations_x[0], hull.stations_x[-1], 30)
+                ys_d = [hull.get_y(min(max(0, np.searchsorted(hull.stations_x, x_val, side='right')-1), len(hull.stations_x)-1), z_val) for x_val in xs_d]
+                x_mesh.append(xs_d)
+                y_mesh.append(ys_d)
+                z_mesh.append(np.full_like(xs_d, z_val))
                 
             fig_3d = go.Figure()
-            fig_3d.add_trace(go.Surface(x=x_mesh, y=y_mesh, z=z_mesh, colorscale='Viridis', opacity=0.85, showscale=False, name="Boreste"))
-            fig_3d.add_trace(go.Surface(x=x_mesh, y=[[-v for v in row] for row in y_mesh], z=z_mesh, colorscale='Viridis', opacity=0.85, showscale=False, name="Bombordo"))
+            fig_3d.add_trace(go.Surface(x=x_mesh, y=y_mesh, z=z_mesh, colorscale='Viridis', opacity=0.88, showscale=False, name="Boreste (+Y)"))
+            fig_3d.add_trace(go.Surface(x=x_mesh, y=[[-v for v in row] for row in y_mesh], z=z_mesh, colorscale='Viridis', opacity=0.88, showscale=False, name="Bombordo (-Y)"))
             
-            xp, yp = np.meshgrid(np.linspace(hull.stations_x[0], hull.stations_x[-1], 6), np.linspace(-hull.B/2, hull.B/2, 6))
+            # Plano da Água Flutuante
+            xp, yp = np.meshgrid(np.linspace(hull.stations_x[0], hull.stations_x[-1], 8), np.linspace(-hull.B/2, hull.B/2, 8))
             zp = np.full_like(xp, viz_draft)
-            fig_3d.add_trace(go.Surface(x=xp, y=yp, z=zp, colorscale=[[0, 'rgba(72, 202, 228, 0.45)'], [1, 'rgba(72, 202, 228, 0.45)']], showscale=False, name="Plano da Água"))
+            fig_3d.add_trace(go.Surface(
+                x=xp, y=yp, z=zp,
+                colorscale=[[0, 'rgba(0, 245, 212, 0.40)'], [1, 'rgba(0, 245, 212, 0.40)']],
+                showscale=False, name=f"Plano da Água (T={viz_draft:.2f}m)"
+            ))
             
             fig_3d.update_layout(
-                scene=dict(xaxis_title="X (m)", yaxis_title="Y (m)", zaxis_title="Z (m)", aspectmode='data'),
-                template="plotly_dark", height=460, margin=dict(l=10, r=10, t=10, b=10)
+                title=f"Casco 3D: {st.session_state.ship_name}",
+                scene=dict(
+                    xaxis_title="X (m) [Longitudinal]",
+                    yaxis_title="Y (m) [Transversal]",
+                    zaxis_title="Z (m) [Vertical]",
+                    aspectmode='data'
+                ),
+                template="plotly_dark", height=480, margin=dict(l=10, r=10, t=40, b=10)
             )
             st.plotly_chart(fig_3d, use_container_width=True)
 
