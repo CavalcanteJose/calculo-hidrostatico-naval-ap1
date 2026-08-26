@@ -974,7 +974,7 @@ else:
 
         def get_sheer_figure():
             fig = go.Figure()
-            xs_eval = np.linspace(hull.stations_x[0], hull.stations_x[-1], 140)
+            xs_eval = np.linspace(hull.stations_x[0], hull.stations_x[-1], 150)
             mid_x = hull.stations_x[5]
             
             # 1. Malha de Referência (Grid): Balizas verticais (ST 00 a ST 10)
@@ -991,48 +991,68 @@ else:
                     annotation_text=f"WL {k:02d}" if k > 0 else "LB", annotation_position="left"
                 )
 
-            # 2. Painel de Popa (PR / ST 00)
+            # 2. Contorno do Casco Inteiro (Perfil Lateral Completo)
+            # Linha de Quilha & Roda de Proa (Inferior)
+            z_keel = []
+            for xv in xs_eval:
+                frac = xv / hull.stations_x[-1]
+                if frac <= 0.45:
+                    z_val = 0.0
+                else:
+                    z_val = hull.D * (((frac - 0.45) / 0.55) ** 1.85)
+                z_keel.append(float(z_val))
+            z_keel = np.array(z_keel)
+
+            # Linha de Convés / Borda Livre (Superior)
+            z_deck = np.array([float(hull.D - 0.04 + 0.04 * ((xv / hull.stations_x[-1]) ** 1.8)) for xv in xs_eval])
+
+            # Preenchimento Sombreado do Corpo Lateral do Casco (Lateral Inteira da Embarcação)
+            x_hull_body = np.concatenate([[0.0], xs_eval, [hull.stations_x[-1]], [0.0]])
+            z_hull_body = np.concatenate([[0.0], z_deck, [hull.D], [0.0]])
+            
             fig.add_trace(go.Scatter(
-                x=[0.0, 0.0], y=[0.0, hull.D], mode='lines',
-                name="Painel de Popa (PR)",
+                x=xs_eval, y=z_keel, mode='lines',
+                line=dict(color="rgba(0,0,0,0)"), showlegend=False
+            ))
+            fig.add_trace(go.Scatter(
+                x=xs_eval, y=z_deck, mode='lines',
+                fill='tonexty', fillcolor='rgba(59, 130, 246, 0.12)',
+                name="Corpo Lateral do Navio (Perfil Completo)",
                 line=dict(color="#fca311", width=3.0)
             ))
 
-            # 3. Linha de Convés / Borda Livre (Sheer Line do Convés)
-            # Quase reta com leve tosa subindo suavemente até a proa
-            z_deck = [float(hull.D - 0.05 + 0.05 * ((xv / hull.stations_x[-1]) ** 2)) for xv in xs_eval]
+            # 3. Painel de Popa (PR / ST 00)
             fig.add_trace(go.Scatter(
-                x=xs_eval, y=z_deck, mode='lines',
-                name="Linha de Convés (Sheer Line)",
+                x=[0.0, 0.0], y=[0.0, float(z_deck[0])], mode='lines',
+                name="Painel de Popa (ST 00)",
                 line=dict(color="#fca311", width=3.0)
             ))
 
             # 4. Perfil da Quilha & Roda de Proa (Linha de Centro Y = 0)
-            z_stem = [0.0 if xv <= mid_x else float(hull.D * (((xv - mid_x) / (hull.stations_x[-1] - mid_x)) ** 1.85)) for xv in xs_eval]
             fig.add_trace(go.Scatter(
-                x=xs_eval, y=z_stem, mode='lines',
+                x=xs_eval, y=z_keel, mode='lines',
                 name="Perfil da Quilha & Roda de Proa (Y=0)",
                 line=dict(color="#ffffff", width=3.2)
             ))
 
             # 5. Linhas do Alto (Cortes I, II, III / Conforme desenho verde do usuário)
-            # Retas/suaves na popa/meia-nau e subindo harmoniosamente em leque até o bico de proa
             buttock_curves = [
-                {"name": "Corte I (Y = 340 mm)", "z_aft": 0.15, "color": "#c084fc", "w": 2.4, "power": 1.95},
-                {"name": "Corte II (Y = 680 mm)", "z_aft": 0.50, "color": "#f43f5e", "w": 2.4, "power": 1.70},
-                {"name": "Corte III (Y = 1000 mm)", "z_aft": 1.05, "color": "#38bdf8", "w": 2.4, "power": 1.45}
+                {"name": "Corte I (Y = 340 mm)", "z_start": 0.15, "color": "#c084fc", "w": 2.4, "power": 1.90},
+                {"name": "Corte II (Y = 680 mm)", "z_start": 0.50, "color": "#f43f5e", "w": 2.4, "power": 1.65},
+                {"name": "Corte III (Y = 1000 mm)", "z_start": 1.05, "color": "#38bdf8", "w": 2.4, "power": 1.40}
             ]
 
             for b in buttock_curves:
                 z_b = []
                 for xv in xs_eval:
-                    if xv <= mid_x:
+                    frac = xv / hull.stations_x[-1]
+                    if frac <= 0.45:
                         # Popa até a meia-nau: quase horizontal/nivelada
-                        z_val = b["z_aft"]
+                        z_val = b["z_start"]
                     else:
-                        # Meia-nau até a proa: sobe suavemente até coincidir com o bico em ST 10 (Z = D)
-                        frac = (xv - mid_x) / (hull.stations_x[-1] - mid_x)
-                        z_val = b["z_aft"] + (hull.D - b["z_aft"]) * (frac ** b["power"])
+                        # Meia-nau até a proa: curva suave contínua em leque até o bico de proa (Z = D)
+                        f_proa = (frac - 0.45) / 0.55
+                        z_val = b["z_start"] + (hull.D - b["z_start"]) * (f_proa ** b["power"])
                     z_b.append(float(z_val))
                 
                 fig.add_trace(go.Scatter(
