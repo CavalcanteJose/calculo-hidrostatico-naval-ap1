@@ -879,6 +879,7 @@ else:
 
         def get_waterlines_figure():
             fig = go.Figure()
+            xs_eval = np.linspace(hull.stations_x[0], hull.stations_x[-1], 120)
             
             # 1. Malha de Referência (Grid): Balizas verticais vermelhas (ST 00 a ST 10)
             for j, st_x in enumerate(hull.stations_x):
@@ -895,55 +896,23 @@ else:
             # Linha de Centro (℄ LC - Linha base inferior horizontal)
             fig.add_hline(y=0, line_color="#ef4444", line_width=2.2, annotation_text="℄ LC (Linha de Centro)", annotation_position="left")
 
-            # 2. Traçar Linhas d'Água (WL 01 a WL 10)
-            # Cada WL é traçada estritamente em seu intervalo de validade [X_start, X_end]
+            # 2. Traçar Linhas d'Água (WL 01 a WL 10) de forma 100% contínua e suave
             for k, wz in enumerate(hull.waterlines_z):
                 if wz <= 0.0:
                     continue
-                y_pts_wl = [hull.offsets[k, j] for j in range(len(hull.stations_x))]
-                
-                # Identifica estações com largura não nula
-                valid_indices = [j for j, y in enumerate(y_pts_wl) if y > 0.0]
-                if not valid_indices:
-                    continue
-                
-                first_idx, last_idx = valid_indices[0], valid_indices[-1]
-                
-                # Pontos de controle para interpolação
-                x_ctrl, y_ctrl = [], []
-                if first_idx > 0:
-                    x_ctrl.append(float(hull.stations_x[first_idx - 1]))
-                    y_ctrl.append(0.0)
-                else:
-                    x_ctrl.append(float(hull.stations_x[0]))
-                    y_ctrl.append(float(y_pts_wl[0]))
-                    
-                for j in range(first_idx, last_idx + 1):
-                    x_ctrl.append(float(hull.stations_x[j]))
-                    y_ctrl.append(float(y_pts_wl[j]))
-                    
-                if last_idx < len(hull.stations_x) - 1:
-                    x_ctrl.append(float(hull.stations_x[last_idx + 1]))
-                    y_ctrl.append(0.0)
-                    
-                x_eval_wl = np.linspace(x_ctrl[0], x_ctrl[-1], 100)
-                pchip_wl = PchipInterpolator(x_ctrl, y_ctrl)
-                y_eval_wl = np.maximum(0.0, pchip_wl(x_eval_wl))
+                ys_wz = [hull.get_y_continuous(xv, wz) for xv in xs_eval]
                 
                 fig.add_trace(go.Scatter(
-                    x=x_eval_wl, y=y_eval_wl, mode='lines',
+                    x=xs_eval, y=ys_wz, mode='lines',
                     name=f"WL {k:02d} (z={wz:.2f}m)",
-                    line=dict(color="#3b82f6", width=1.9)
+                    line=dict(color="#3b82f6", width=1.8)
                 ))
 
             # Linha d'água ativa do calado selecionado (T)
-            y_pts_act = [hull.get_y(j, viz_draft) for j in range(len(hull.stations_x))]
-            pchip_act = PchipInterpolator(hull.stations_x, y_pts_act)
-            xs_act = np.linspace(hull.stations_x[0], hull.stations_x[-1], 120)
-            ys_act = np.maximum(0.0, pchip_act(xs_act))
+            ys_act = [hull.get_y_continuous(xv, viz_draft) for xv in xs_eval]
             
             fig.add_trace(go.Scatter(
-                x=xs_act, y=ys_act, mode='lines',
+                x=xs_eval, y=ys_act, mode='lines',
                 name=f"★ WL Ativa T={viz_draft:.2f}m",
                 line=dict(color="#00f5d4", width=3.5)
             ))
@@ -976,7 +945,6 @@ else:
                 )
 
             # 2. Perfil da Roda de Proa & Quilha (Linha de Centro Y = 0)
-            # Roda de proa partindo suavemente da quilha (ST 06) e subindo na proa até ST 10 (z=1.80m)
             x_stem_ctrl = [0.000, 5.467, 6.378, 7.290, 8.201, 9.112]
             z_stem_ctrl = [0.000, 0.000, 0.060, 0.280, 0.800, 1.800]
             pchip_stem = PchipInterpolator(x_stem_ctrl, z_stem_ctrl)
@@ -989,7 +957,6 @@ else:
             ))
 
             # 3. Linha de Convés / Borda Livre (Deck Line / Sheer Line)
-            # Curvatura oficial com tosa de proa do PDF
             x_deck_ctrl = [0.000, 2.734, 4.556, 7.290, 9.112]
             z_deck_ctrl = [1.600, 1.500, 1.460, 1.580, 1.800]
             pchip_deck = PchipInterpolator(x_deck_ctrl, z_deck_ctrl)
@@ -1009,27 +976,23 @@ else:
                 {"y": 1.000, "name": "Corte C (Y = 1000 mm)", "color": "#38bdf8", "w": 2.4}
             ]
             
+            z_search = np.linspace(hull.waterlines_z[0], hull.D, 100)
+            
             for cut in cuts_data:
                 y_c = cut["y"]
-                x_pts, z_pts = [], []
+                x_curve, z_curve = [], []
                 
-                for j, st_x in enumerate(hull.stations_x):
-                    y_station = hull.offsets[:, j]
-                    z_station = hull.waterlines_z
-                    
-                    if y_c <= np.max(y_station):
-                        # Altura Z exata onde a baliza j intercepta Y_c
-                        z_val = float(np.interp(y_c, y_station, z_station))
-                        x_pts.append(st_x)
-                        z_pts.append(z_val)
+                for xv in xs_eval:
+                    y_at_z = np.array([hull.get_y_continuous(xv, zi) for zi in z_search])
+                    if np.max(y_at_z) >= y_c:
+                        # Encontra a cota Z exata onde a largura atinge y_c
+                        z_val = float(np.interp(y_c, y_at_z, z_search))
+                        x_curve.append(float(xv))
+                        z_curve.append(float(z_val))
                         
-                if len(x_pts) >= 3:
-                    x_b_dense = np.linspace(x_pts[0], x_pts[-1], 80)
-                    pchip_b = PchipInterpolator(x_pts, z_pts)
-                    z_b_dense = np.clip(pchip_b(x_b_dense), 0.0, hull.D)
-                    
+                if len(x_curve) >= 4:
                     fig.add_trace(go.Scatter(
-                        x=x_b_dense, y=z_b_dense, mode='lines',
+                        x=x_curve, y=z_curve, mode='lines',
                         name=f"Linha do Alto {cut['name']}",
                         line=dict(color=cut["color"], width=cut["w"])
                     ))
