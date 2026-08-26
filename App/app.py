@@ -511,6 +511,68 @@ def generate_real_ship():
     return df
 
 
+def generate_panamax_ship():
+    """
+    Petroleiro Panamax I (EMP - Engenharia Naval / Manaus AM)
+    Dimensões Oficiais do Desenho Técnico (PDF Anexo A, B, D):
+      - Comprimento Total (LOA): 219.293 m
+      - Comprimento Entre Perpendiculares (LBP): 204.780 m
+      - Boca Moldada (B): 38.000 m (Meia-boca máxima = 19.256 m)
+      - Pontal Moldado (D): 19.000 m
+      - Calado de Projeto (Td): 13.740 m
+      - 24 Balizas (ST -1/2 a ST 20) e 11 Linhas d'Água (WL 00 a WL 10)
+    """
+    xs = np.array([
+        -5.120, 0.000, 5.120, 10.239, 20.478, 30.717, 40.956, 51.195, 61.434, 71.673, 81.912, 92.151,
+        102.390, 112.629, 122.868, 133.107, 143.346, 153.585, 163.824, 174.063, 184.302, 194.541, 199.661, 204.780
+    ])
+    # Ajuste de coordenadas relativas para x >= 0 a partir da Popa (ST -1/2 = 0m)
+    xs_shifted = xs - xs[0]
+    
+    zs = np.array([0.00, 1.90, 3.80, 5.70, 7.60, 9.50, 11.40, 13.30, 15.20, 17.10, 19.00])
+
+    data = [
+        # WL 00 (z = 0.000 m - Linha de Base / Fundo)
+        [0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000,
+         0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 0.000],
+        # WL 01 (z = 1.900 m)
+        [0.000, 0.000, 0.096, 2.680, 7.930, 12.588, 16.014, 18.008, 18.766, 18.922, 18.937, 18.937,
+         18.937, 18.937, 18.936, 18.925, 18.865, 18.703, 18.316, 17.050, 14.301, 9.102, 3.316, 0.000],
+        # WL 02 (z = 3.800 m)
+        [0.000, 0.000, 0.112, 3.177, 9.089, 13.839, 17.051, 18.587, 19.070, 19.161, 19.170, 19.170,
+         19.170, 19.170, 19.170, 19.160, 19.107, 18.968, 18.657, 17.614, 15.202, 10.439, 6.323, 0.000],
+        # WL 03 (z = 5.700 m)
+        [0.000, 0.000, 0.531, 3.945, 10.038, 14.712, 17.622, 18.820, 19.167, 19.232, 19.238, 19.238,
+         19.238, 19.238, 19.238, 19.227, 19.165, 19.011, 18.695, 17.694, 15.354, 10.706, 7.142, 0.000],
+        # WL 04 (z = 7.600 m)
+        [0.000, 0.000, 2.040, 5.488, 11.269, 15.567, 18.044, 18.930, 19.195, 19.251, 19.256, 19.256,
+         19.256, 19.256, 19.256, 19.244, 19.176, 19.012, 18.688, 17.696, 15.368, 10.737, 7.257, 0.000],
+        # WL 05 (z = 9.500 m)
+        [0.000, 1.761, 4.834, 7.755, 12.833, 16.455, 18.379, 18.988, 19.195, 19.244, 19.249, 19.249,
+         19.249, 19.249, 19.249, 19.236, 19.167, 18.998, 18.672, 17.690, 15.376, 10.790, 7.359, 0.000],
+        # WL 06 (z = 11.400 m)
+        [2.400, 5.210, 7.840, 10.296, 14.464, 17.276, 18.630, 19.015, 19.176, 19.218, 19.222, 19.222,
+         19.222, 19.222, 19.222, 19.211, 19.149, 19.000, 18.710, 17.817, 15.652, 11.248, 7.941, 0.000],
+        # WL 07 (z = 13.300 m)
+        [5.890, 8.429, 10.671, 12.683, 15.896, 17.929, 18.805, 19.026, 19.145, 19.180, 19.183, 19.183,
+         19.183, 19.183, 19.183, 19.176, 19.135, 19.035, 18.840, 18.170, 16.371, 12.331, 9.207, 0.000],
+        # WL 08 (z = 15.200 m)
+        [9.260, 11.453, 13.267, 14.821, 17.092, 18.397, 18.912, 19.027, 19.107, 19.133, 19.136, 19.136,
+         19.136, 19.136, 19.135, 19.132, 19.116, 19.078, 19.007, 18.643, 17.382, 13.851, 10.925, 5.018],
+        # WL 09 (z = 17.100 m)
+        [12.450, 14.207, 15.546, 16.621, 18.009, 18.708, 18.968, 19.019, 19.066, 19.081, 19.082, 19.082,
+         19.082, 19.082, 19.082, 19.081, 19.076, 19.065, 19.053, 18.924, 18.336, 15.499, 12.722, 8.296],
+        # WL 10 (z = 19.000 m - Convés)
+        [15.490, 16.741, 17.570, 18.158, 18.716, 18.922, 18.993, 19.007, 19.021, 19.026, 19.027, 19.027,
+         19.027, 19.027, 19.027, 19.026, 19.022, 19.014, 19.007, 18.995, 18.949, 17.077, 14.481, 10.797]
+    ]
+
+    df = pd.DataFrame(data, index=zs, columns=xs_shifted)
+    df.index.name = "Z_WL (m)"
+    df.columns.name = "Estações X (m)"
+    return df
+
+
 def generate_vlcc_320k():
     """
     Superpetroleiro 320.000 DWT VLCC — Benchmark Seoul National University (Term Project 2)
@@ -716,6 +778,7 @@ if st.session_state.app_state == "home":
                 "🧱 Barcaça Paralelepipédica (Validação Analítica)",
                 "🚢 Navio Mercante 100m (Exemplo Realista)",
                 "⛵ Navio Real — Tabela de Cotas (11 Balizas × 11 WL)",
+                "⛽ Petroleiro Panamax I (204.78m × 38.0m × 19.0m - EMP)",
                 "🛢️ Superpetroleiro 320K VLCC (Seoul National University Benchmark)",
                 "📁 Fazer Upload de Tabela de Cotas (.xlsx / .csv)"
             ],
@@ -741,6 +804,9 @@ if st.session_state.app_state == "home":
         elif origin_choice == "⛵ Navio Real — Tabela de Cotas (11 Balizas × 11 WL)":
             st.session_state.df_offsets = generate_real_ship()
             st.session_state.ship_name = "Navio Real (9.11m × 2.40m × 1.06m)"
+        elif origin_choice == "⛽ Petroleiro Panamax I (204.78m × 38.0m × 19.0m - EMP)":
+            st.session_state.df_offsets = generate_panamax_ship()
+            st.session_state.ship_name = "Petroleiro Panamax I (204.78m × 38.0m × 19.0m)"
         elif origin_choice == "🛢️ Superpetroleiro 320K VLCC (Seoul National University Benchmark)":
             st.session_state.df_offsets = generate_vlcc_320k()
             st.session_state.ship_name = "320K VLCC (320m × 60m × 30m)"
