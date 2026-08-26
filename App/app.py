@@ -888,7 +888,10 @@ else:
                     annotation_text=f"ST {j:02d}", annotation_position="top"
                 )
 
-            # Linhas d'água existentes (WL 01 a WL 10)
+            # Linha de Centro (℄ CL - Linha base inferior do plano)
+            fig.add_hline(y=0, line_color="#ef4444", line_width=2.0, annotation_text="℄ CL (Linha de Centro)", annotation_position="left")
+
+            # Linhas d'água técnicas (WL 01 a WL 10) em Meia-Boca (conforme PDF)
             for k, wz in enumerate(hull.waterlines_z):
                 if wz <= 0.0:
                     continue
@@ -897,13 +900,7 @@ else:
                 fig.add_trace(go.Scatter(
                     x=xs_dense, y=ys_wz, mode='lines',
                     name=f"WL {k:02d} (z={wz:.2f}m)",
-                    line=dict(color="#3b82f6", width=1.6)
-                ))
-                # Espelhamento para visualização simétrica
-                fig.add_trace(go.Scatter(
-                    x=xs_dense, y=[-v for v in ys_wz], mode='lines',
-                    showlegend=False,
-                    line=dict(color="#3b82f6", width=1.2, dash='dot')
+                    line=dict(color="#3b82f6", width=1.8)
                 ))
 
             # Linha d'água ativa do calado selecionado em destaque
@@ -913,19 +910,12 @@ else:
                 name=f"★ WL Ativa T={viz_draft:.2f}m",
                 line=dict(color="#00f5d4", width=3.5)
             ))
-            fig.add_trace(go.Scatter(
-                x=xs_dense, y=[-v for v in ys_active], mode='lines',
-                showlegend=False,
-                line=dict(color="#00f5d4", width=2.5, dash='dash')
-            ))
-
-            # Linha de Centro (CL)
-            fig.add_hline(y=0, line_color="#ef4444", line_width=1.8, annotation_text="℄ CL", annotation_position="left")
 
             fig.update_layout(
-                title="Plano de Linhas d'Água (Waterlines / Vista Superior)",
+                title="Plano de Linhas d'Água (Waterlines / Meia-Boca Oficial - Conforme PDF)",
                 xaxis_title="Comprimento Longitudinal X (m) [ST 00 (Popa) → ST 10 (Proa)]",
-                yaxis_title="Semi-boca Y (m) [← Bombordo | Boreste →]",
+                yaxis_title="Semi-boca Y (m) [Linha de Centro CL = 0 → Borda]",
+                yaxis=dict(rangemode="nonnegative"),
                 template="plotly_dark", height=500, margin=dict(l=25, r=25, t=45, b=25),
                 legend=dict(orientation="h", yanchor="bottom", y=-0.38, xanchor="center", x=0.5)
             )
