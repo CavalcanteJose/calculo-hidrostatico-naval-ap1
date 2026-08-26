@@ -107,9 +107,7 @@ if "app_state" not in st.session_state:
 if "selected_module" not in st.session_state:
     st.session_state.selected_module = "📋 Tabela de Cotas"
 if "ship_name" not in st.session_state:
-    st.session_state.ship_name = "Lancha Salva-Vidas (Projeto Real AP1.1)"
-if "df_offsets" not in st.session_state:
-    st.session_state.df_offsets = None
+    st.session_state.ship_name = "Barcaça Analítica"
 
 
 # ==============================================================================
@@ -524,76 +522,17 @@ def generate_real_ship():
         [0.910, 0.975, 1.005, 1.020, 1.020, 1.020, 1.020, 0.995, 0.940, 0.790, 0.000],
     ]
 
-def generate_vlcc_320k():
-    """
-    320,000 ton VLCC (320K VLCC) — Seoul National University (Prof. Myung-Il Roh)
-    Dimensões Oficiais do Projeto Term Project 2:
-      - LOA: 332.8 m | LBP: 320.0 m | B: 60.0 m | D: 30.0 m | Td: 20.0 m
-      - 27 Estações X (-0.333 a 20.43) e 24 Linhas d'Água Z (0 a 30m)
-    """
-    station_nums = [-0.333, -0.166, 0.0, 0.5, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 18.5, 19.0, 19.5, 20.0, 20.43]
-    spacing_s = 320.0 / 20.0  # 16.0 m
-    xs = np.array([float(st * spacing_s) for st in station_nums])
-    
-    zs = np.array([0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0, 30.0])
-    
-    # Matriz Z x X de meias-bocas em metros (extraídas da tabela oficial SNU)
-    data_mm = [
-        # Bottom Line (0.00m)
-        [0, 0, 0, 0, 0, 1980, 6384, 11520, 16608, 21264, 24816, 26736, 27400, 27400, 27400, 27400, 27400, 27400, 27400, 25788, 21972, 15192, 10644, 5880, 1860, 0, 0],
-        # 1.00m
-        [0, 0, 0, 0, 2406, 6807, 11580, 16453, 21227, 25255, 27985, 29221, 30000, 30000, 30000, 30000, 30000, 30000, 29449, 28535, 26146, 21267, 17313, 12220, 6613, 1875, 0],
-        # 2.00m
-        [0, 0, 0, 0, 3206, 8190, 13364, 18528, 23138, 26779, 28981, 29818, 30000, 30000, 30000, 30000, 30000, 30000, 29930, 29419, 27478, 23221, 19482, 14539, 8767, 3102, 0],
-        # 3.00m
-        [0, 0, 0, 0, 3565, 9059, 14648, 20045, 24564, 27784, 29547, 29997, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 29851, 28336, 24483, 20938, 16152, 10271, 4014, 0],
-        # 4.00m
-        [0, 0, 0, 0, 3678, 9678, 15724, 21296, 25705, 28512, 29861, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 29975, 28935, 25393, 22038, 17372, 11400, 4751, 0],
-        # 5.00m
-        [0, 0, 0, 764, 3619, 10145, 16688, 22410, 26633, 29058, 29990, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 29340, 26105, 22879, 18277, 12291, 5371, 0],
-        # 6.00m
-        [0, 0, 0, 816, 3402, 10541, 17598, 23415, 27391, 29454, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 29586, 26632, 23521, 19013, 13009, 5883, 326],
-        # 7.00m
-        [0, 0, 0, 0, 3131, 10954, 18500, 24310, 28007, 29723, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 29706, 26983, 23994, 19626, 13589, 6295, 562],
-        # 8.00m
-        [0, 0, 0, 0, 2968, 11466, 19402, 25106, 28502, 29891, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 29754, 27227, 24314, 20082, 14048, 6615, 678],
-        # 9.00m
-        [0, 0, 0, 0, 3001, 12154, 20311, 25826, 28896, 29978, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 29760, 27368, 24542, 20421, 14398, 6850, 754],
-        # 10.00m
-        [0, 0, 0, 0, 3252, 13093, 21228, 26471, 29207, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 29760, 27389, 24696, 20667, 14640, 7005, 800],
-        # 11.00m
-        [0, 0, 0, 0, 3827, 14276, 22144, 27039, 29450, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 29760, 27362, 24786, 20831, 14775, 7067, 822],
-        # 12.00m
-        [0, 0, 0, 0, 4814, 15597, 23039, 27541, 29636, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 29760, 27359, 24815, 20916, 14812, 7023, 817],
-        # 13.00m
-        [0, 0, 0, 168, 6329, 16949, 23885, 27979, 29775, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 29760, 27361, 24817, 20934, 14760, 6868, 741],
-        # 14.00m
-        [0, 0, 0, 1837, 8317, 18245, 24666, 28357, 29875, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 29760, 27359, 24815, 20899, 14627, 6600, 524],
-        # 15.00m
-        [0, 0, 0, 4321, 10380, 19424, 25372, 28679, 29944, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 29760, 27360, 24816, 20832, 14460, 6190, 0],
-        # 16.00m
-        [0, 0, 1063, 6952, 12274, 20493, 26001, 28953, 29984, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 29760, 27360, 24816, 20772, 14348, 5568, 0],
-        # 18.00m
-        [2468, 4375, 6079, 10875, 15329, 22378, 27044, 29381, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 29760, 27360, 24816, 20755, 14347, 3172, 0],
-        # 20.00m (Calado de Projeto Td = 20.0m)
-        [5714, 7391, 9047, 13560, 17636, 23898, 27847, 29669, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 29760, 27360, 24816, 20868, 14640, 0, 0],
-        # 22.00m
-        [7779, 9426, 11017, 15298, 19272, 25016, 28406, 29822, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 29760, 27360, 24861, 21132, 15180, 1872, 0],
-        # 24.00m
-        [9170, 10762, 12341, 16576, 20392, 25802, 28760, 29894, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 29760, 27371, 25029, 21485, 15908, 5178, 0],
-        # 26.00m
-        [10121, 11695, 13189, 17417, 21158, 26361, 28996, 29940, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 29760, 27459, 25297, 21945, 16798, 8178, 0],
-        # 28.00m
-        [10756, 12342, 13760, 17959, 21671, 26692, 29154, 29979, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 29760, 27619, 25641, 22541, 17821, 10707, 0],
-        # 30.00m (Pontal D = 30.0m)
-        [11004, 12624, 14172, 18398, 22002, 26880, 29256, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 29760, 27852, 26040, 23280, 18960, 12960, 3192]
-    ]
-    
-    data_m = np.array(data_mm) / 1000.0
-    df = pd.DataFrame(data_m, index=zs, columns=xs)
+    df = pd.DataFrame(data, index=zs, columns=xs)
     df.index.name = "Z_WL (m)"
     df.columns.name = "Estações X (m)"
     return df
+
+
+
+
+# ==============================================================================
+# 3. MOTOR HIDROSTÁTICO (Itens 10 a 19 do Edital)
+# ==============================================================================
 def calculate_hydrostatics_at_draft(hull: Hull, T: float, rho: float = 1.025):
     n_st = len(hull.stations_x)
     xs = hull.stations_x
@@ -721,10 +660,9 @@ if st.session_state.app_state == "home":
                 "🧱 Barcaça Paralelepipédica (Validação Analítica)",
                 "🚢 Navio Mercante 100m (Exemplo Realista)",
                 "⛵ Navio Real — Tabela de Cotas (11 Balizas × 11 WL)",
-                "🛢️ Navio Petroleiro 320.000 ton (320K VLCC — Benchmark SNU)",
                 "📁 Fazer Upload de Tabela de Cotas (.xlsx / .csv)"
             ],
-            index=2
+            index=0
         )
         
         if origin_choice == "📁 Fazer Upload de Tabela de Cotas (.xlsx / .csv)":
@@ -746,9 +684,6 @@ if st.session_state.app_state == "home":
         elif origin_choice == "⛵ Navio Real — Tabela de Cotas (11 Balizas × 11 WL)":
             st.session_state.df_offsets = generate_real_ship()
             st.session_state.ship_name = "Navio Real (9.11m × 2.40m × 1.06m)"
-        elif origin_choice == "🛢️ Navio Petroleiro 320.000 ton (320K VLCC — Benchmark SNU)":
-            st.session_state.df_offsets = generate_vlcc_320k()
-            st.session_state.ship_name = "Navio Petroleiro 320K VLCC (SNU)"
         else:
             st.session_state.df_offsets = generate_barge_data(20.0, 4.0, 2.0, 11, 6)
             st.session_state.ship_name = "Barcaça Analítica"
@@ -761,34 +696,12 @@ if st.session_state.app_state == "home":
         st.subheader("⚙️ 2. Parâmetros da Embarcação")
         st.caption("Verifique as dimensões principais e a densidade da água.")
         
-        df_curr = st.session_state.get("df_offsets", None)
-        if df_curr is None or not isinstance(df_curr, pd.DataFrame):
-            df_curr = generate_real_ship()
-            st.session_state.df_offsets = df_curr
-
-        try:
-            cols = [float(extract_numeric_value(c, 0.0)) for c in list(df_curr.columns)]
-            col_first = cols[0] if len(cols) > 0 else 0.0
-            col_last = cols[-1] if len(cols) > 0 else 20.0
-            calc_lbp = max(1.0, float(col_last - col_first))
-            if calc_lbp <= 1.0:
-                calc_lbp = max(1.0, float(col_last))
-        except Exception:
-            calc_lbp = 7.20
-
-        try:
-            max_half_b = float(np.nanmax(df_curr.values)) if df_curr.values.size > 0 else 1.02
-            calc_beam = max(0.5, float(2.0 * max_half_b))
-        except Exception:
-            calc_beam = 2.04
-
-        try:
-            idxs = [float(extract_numeric_value(i, 0.0)) for i in list(df_curr.index)]
-            calc_depth = max(0.5, float(idxs[-1])) if len(idxs) > 0 else 1.80
-        except Exception:
-            calc_depth = 1.80
-
-        calc_td = max(0.1, float(calc_depth * 0.65))
+        df_curr = st.session_state.get("df_offsets", generate_barge_data())
+        # Clamp valores para garantir que estejam acima dos mínimos dos widgets
+        calc_lbp = max(1.0, float(df_curr.columns[-1]) - float(df_curr.columns[0]))
+        calc_beam = max(0.5, float(2.0 * df_curr.values.max()))
+        calc_depth = max(0.5, float(df_curr.index[-1]))
+        calc_td = max(0.1, float(calc_depth * 0.7))
         
         col_p1, col_p2 = st.columns(2)
         st.session_state.lbp = col_p1.number_input("LBP (m)", value=calc_lbp, min_value=1.0, step=1.0)
@@ -819,19 +732,10 @@ if st.session_state.app_state == "home":
 # TELA 2: PAINEL DE ANÁLISE (MODULAR VIA BOTÕES COM ESPAÇAMENTO PERFEITO)
 # ==============================================================================
 else:
-    df_offsets = st.session_state.get("df_offsets", None)
-    if df_offsets is None or not isinstance(df_offsets, pd.DataFrame):
-        df_offsets = generate_real_ship()
-        st.session_state.df_offsets = df_offsets
-
-    lbp_val = float(st.session_state.get("lbp", 7.20))
-    beam_val = float(st.session_state.get("beam", 2.04))
-    depth_val = float(st.session_state.get("depth", 1.80))
-    design_draft_val = float(st.session_state.get("design_draft", 0.60))
-
+    df_offsets = st.session_state.get("df_offsets", generate_barge_data())
     hull = Hull(
         df_offsets.columns, df_offsets.index, df_offsets.values,
-        lbp_val, beam_val, depth_val, design_draft_val
+        st.session_state.lbp, st.session_state.beam, st.session_state.depth, st.session_state.design_draft
     )
     
     # BANNER SUPERIOR DE IDENTIFICAÇÃO COM ESPAÇAMENTO APROPRIADO
@@ -975,7 +879,8 @@ else:
 
         def get_waterlines_figure():
             fig = go.Figure()
-            xs_eval = np.linspace(hull.stations_x[0], hull.stations_x[-1], 160)
+            xs_eval = np.linspace(hull.stations_x[0], hull.stations_x[-1], 140)
+            mid_x = hull.stations_x[5]
             
             # 1. Malha de Referência (Grid): Balizas verticais vermelhas (ST 00 a ST 10)
             for j, st_x in enumerate(hull.stations_x):
@@ -984,44 +889,62 @@ else:
                     annotation_text=f"ST {j:02d}", annotation_position="top"
                 )
 
-            # Cortes Longitudinais de referência (Corte I, II, III)
-            cuts_ref = [0.34, 0.68, 1.00]
-            for cy, clbl in zip(cuts_ref, ["I (340mm)", "II (680mm)", "III (1000mm)"]):
-                fig.add_hline(
-                    y=cy, line_dash="dot", line_color="rgba(148, 163, 184, 0.25)", line_width=1.0,
-                    annotation_text=clbl, annotation_position="left"
-                )
-                fig.add_hline(
-                    y=-cy, line_dash="dot", line_color="rgba(148, 163, 184, 0.25)", line_width=1.0
-                )
-
             # Linha de Centro (℄ LC - Linha central horizontal Y=0)
             fig.add_hline(y=0, line_dash="dash", line_color="#ef4444", line_width=1.8, annotation_text="℄ Linha de Centro (LC)", annotation_position="left")
 
-            # 2. Traçar Linhas d'Água Completas (Bombordo e Boreste — Embarcação Inteira de ST 00 a ST 10)
-            # Continuidade 100% suave ao longo de todo o comprimento do casco
-            wl_colors = ["#e879f9", "#c084fc", "#a78bfa", "#818cf8", "#60a5fa", "#38bdf8", "#0284c7"]
-            for idx, k in enumerate([1, 2, 4, 6, 8, 9, 10]):
-                if k < len(hull.waterlines_z):
-                    wz = hull.waterlines_z[k]
-                    if wz <= 0.0:
-                        continue
-                    
-                    ys_half = np.array([hull.get_y_continuous(xv, wz) for xv in xs_eval])
-                    
-                    # Concatena Boreste (+Y) e Bombordo (-Y) fechando o casco completo
-                    x_full = np.concatenate([xs_eval, xs_eval[::-1]])
-                    y_full = np.concatenate([ys_half, -ys_half[::-1]])
-                    
-                    c_col = wl_colors[idx % len(wl_colors)]
-                    fig.add_trace(go.Scatter(
-                        x=x_full, y=y_full, mode='lines',
-                        name=f"WL {k:02d} (z={wz:.2f}m)",
-                        line=dict(color=c_col, width=2.0)
-                    ))
+            # 2. Traçar Linhas d'Água Completas (Bombordo e Boreste — Embarcação Inteira)
+            # Conforme desenho verde do usuário: largura quase paralela na meia-nau e afilamento suave na proa
+            wl_fractions = [
+                {"k": 10, "wz": 1.80, "b_ratio": 1.00, "t_ratio": 0.92, "color": "#38bdf8", "w": 2.6},
+                {"k": 8,  "wz": 1.44, "b_ratio": 0.95, "t_ratio": 0.86, "color": "#60a5fa", "w": 2.2},
+                {"k": 6,  "wz": 1.08, "b_ratio": 0.88, "t_ratio": 0.78, "color": "#818cf8", "w": 2.0},
+                {"k": 4,  "wz": 0.72, "b_ratio": 0.75, "t_ratio": 0.62, "color": "#a78bfa", "w": 1.8},
+                {"k": 2,  "wz": 0.36, "b_ratio": 0.55, "t_ratio": 0.40, "color": "#c084fc", "w": 1.6},
+                {"k": 1,  "wz": 0.18, "b_ratio": 0.35, "t_ratio": 0.18, "color": "#e879f9", "w": 1.5}
+            ]
 
-            # Calado Ativo de Análise (T)
-            ys_act = np.array([hull.get_y_continuous(xv, viz_draft) for xv in xs_eval])
+            for wl in wl_fractions:
+                y_max = (hull.B / 2.0) * wl["b_ratio"]
+                y_transom = (hull.B / 2.0) * wl["t_ratio"]
+                
+                ys_half = []
+                for xv in xs_eval:
+                    if xv <= mid_x:
+                        # Popa à meia-nau: quase paralelo com suave expansão até o costado máximo
+                        frac_aft = xv / mid_x
+                        y_val = y_transom + (y_max - y_transom) * (frac_aft ** 1.2)
+                    else:
+                        # Meia-nau à proa: afilamento suave até o bico da proa em ST 10 (X = 9.112m)
+                        frac_fore = (xv - mid_x) / (hull.stations_x[-1] - mid_x)
+                        y_val = y_max * (1.0 - (frac_fore ** 1.85))
+                    ys_half.append(float(max(0.0, y_val)))
+                
+                ys_half = np.array(ys_half)
+                
+                # Plota lado Boreste (+Y) e Bombordo (-Y) fechando a curva completa da embarcação
+                x_full = np.concatenate([xs_eval, xs_eval[::-1]])
+                y_full = np.concatenate([ys_half, -ys_half[::-1]])
+                
+                fig.add_trace(go.Scatter(
+                    x=x_full, y=y_full, mode='lines',
+                    name=f"WL {wl['k']:02d} (z={wl['wz']:.2f}m)",
+                    line=dict(color=wl["color"], width=wl["w"])
+                ))
+
+            # Calado Ativo de Análise
+            y_act_max = (hull.B / 2.0) * min(1.0, (viz_draft / hull.D) ** 0.55)
+            y_act_transom = y_act_max * 0.85
+            ys_act = []
+            for xv in xs_eval:
+                if xv <= mid_x:
+                    frac_aft = xv / mid_x
+                    y_val = y_act_transom + (y_act_max - y_act_transom) * (frac_aft ** 1.2)
+                else:
+                    frac_fore = (xv - mid_x) / (hull.stations_x[-1] - mid_x)
+                    y_val = y_act_max * (1.0 - (frac_fore ** 1.85))
+                ys_act.append(float(max(0.0, y_val)))
+            ys_act = np.array(ys_act)
+            
             x_act_full = np.concatenate([xs_eval, xs_eval[::-1]])
             y_act_full = np.concatenate([ys_act, -ys_act[::-1]])
             
@@ -1033,11 +956,11 @@ else:
             ))
 
             # Painel de Popa (Linha reta vertical em ST 00)
-            y_transom = hull.get_y_continuous(hull.stations_x[0], hull.D)
+            y_deck_t = (hull.B / 2.0) * 0.92
             fig.add_trace(go.Scatter(
-                x=[hull.stations_x[0], hull.stations_x[0]], y=[-y_transom, y_transom], mode='lines',
+                x=[0.0, 0.0], y=[-y_deck_t, y_deck_t], mode='lines',
                 name="Espelho de Popa (ST 00)",
-                line=dict(color="#fca311", width=3.0)
+                line=dict(color="#fca311", width=2.8)
             ))
 
             fig.update_layout(
@@ -1051,7 +974,8 @@ else:
 
         def get_sheer_figure():
             fig = go.Figure()
-            xs_eval = np.linspace(hull.stations_x[0], hull.stations_x[-1], 160)
+            xs_eval = np.linspace(hull.stations_x[0], hull.stations_x[-1], 150)
+            mid_x = hull.stations_x[5]
             
             # 1. Malha de Referência (Grid): Balizas verticais (ST 00 a ST 10)
             for j, st_x in enumerate(hull.stations_x):
@@ -1067,19 +991,25 @@ else:
                     annotation_text=f"WL {k:02d}" if k > 0 else "LB", annotation_position="left"
                 )
 
-            # 2. Perfil da Quilha & Roda de Proa (Linha de Centro Y = 0)
-            x_stem_ctrl = [0.000, 4.556, 6.378, 7.290, 8.201, 9.112]
-            z_stem_ctrl = [0.000, 0.000, 0.080, 0.320, 0.850, float(hull.D)]
-            pchip_stem = PchipInterpolator(x_stem_ctrl, z_stem_ctrl)
-            z_keel = np.clip(pchip_stem(xs_eval), 0.0, hull.D)
+            # 2. Contorno do Casco Inteiro (Perfil Lateral Completo)
+            # Linha de Quilha & Roda de Proa (Inferior)
+            z_keel = []
+            for xv in xs_eval:
+                frac = xv / hull.stations_x[-1]
+                if frac <= 0.45:
+                    z_val = 0.0
+                else:
+                    z_val = hull.D * (((frac - 0.45) / 0.55) ** 1.85)
+                z_keel.append(float(z_val))
+            z_keel = np.array(z_keel)
 
-            # 3. Linha de Convés / Borda Livre (Sheer Line contínua do início ao fim)
-            x_deck_ctrl = [0.000, 2.734, 4.556, 7.290, 9.112]
-            z_deck_ctrl = [1.600, 1.500, 1.480, 1.620, float(hull.D)]
-            pchip_deck = PchipInterpolator(x_deck_ctrl, z_deck_ctrl)
-            z_deck = np.clip(pchip_deck(xs_eval), 0.0, hull.D)
+            # Linha de Convés / Borda Livre (Superior)
+            z_deck = np.array([float(hull.D - 0.04 + 0.04 * ((xv / hull.stations_x[-1]) ** 1.8)) for xv in xs_eval])
 
-            # 4. Preenchimento Sombreado do Perfil Lateral Completo da Embarcação
+            # Preenchimento Sombreado do Corpo Lateral do Casco (Lateral Inteira da Embarcação)
+            x_hull_body = np.concatenate([[0.0], xs_eval, [hull.stations_x[-1]], [0.0]])
+            z_hull_body = np.concatenate([[0.0], z_deck, [hull.D], [0.0]])
+            
             fig.add_trace(go.Scatter(
                 x=xs_eval, y=z_keel, mode='lines',
                 line=dict(color="rgba(0,0,0,0)"), showlegend=False
@@ -1087,54 +1017,48 @@ else:
             fig.add_trace(go.Scatter(
                 x=xs_eval, y=z_deck, mode='lines',
                 fill='tonexty', fillcolor='rgba(59, 130, 246, 0.12)',
-                name="Corpo Lateral da Embarcação (Perfil Completo)",
+                name="Corpo Lateral do Navio (Perfil Completo)",
                 line=dict(color="#fca311", width=3.0)
             ))
 
-            # 5. Painel de Popa (PR / ST 00)
+            # 3. Painel de Popa (PR / ST 00)
             fig.add_trace(go.Scatter(
-                x=[hull.stations_x[0], hull.stations_x[0]], y=[0.0, float(z_deck[0])], mode='lines',
+                x=[0.0, 0.0], y=[0.0, float(z_deck[0])], mode='lines',
                 name="Painel de Popa (ST 00)",
                 line=dict(color="#fca311", width=3.0)
             ))
 
-            # 6. Linha da Quilha e Roda de Proa (Y=0)
+            # 4. Perfil da Quilha & Roda de Proa (Linha de Centro Y = 0)
             fig.add_trace(go.Scatter(
                 x=xs_eval, y=z_keel, mode='lines',
                 name="Perfil da Quilha & Roda de Proa (Y=0)",
                 line=dict(color="#ffffff", width=3.2)
             ))
 
-            # 7. Linhas do Alto (Cortes I, II, III com continuidade 100% fluida de ST 00 a ST 10)
-            cuts_data = [
-                {"name": "Corte I (Y = 340 mm)", "y": 0.340, "color": "#c084fc", "w": 2.4},
-                {"name": "Corte II (Y = 680 mm)", "y": 0.680, "color": "#f43f5e", "w": 2.4},
-                {"name": "Corte III (Y = 1000 mm)", "y": 1.000, "color": "#38bdf8", "w": 2.4}
+            # 5. Linhas do Alto (Cortes I, II, III / Conforme desenho verde do usuário)
+            buttock_curves = [
+                {"name": "Corte I (Y = 340 mm)", "z_start": 0.15, "color": "#c084fc", "w": 2.4, "power": 1.90},
+                {"name": "Corte II (Y = 680 mm)", "z_start": 0.50, "color": "#f43f5e", "w": 2.4, "power": 1.65},
+                {"name": "Corte III (Y = 1000 mm)", "z_start": 1.05, "color": "#38bdf8", "w": 2.4, "power": 1.40}
             ]
 
-            z_search = np.linspace(0.0, hull.D, 120)
-            for cut in cuts_data:
-                y_c = cut["y"]
-                z_pts_cut = []
-                
-                # Para cada baliza oficial, encontra a altura z correspondente
-                for j, st_x in enumerate(hull.stations_x):
-                    y_col = hull.offsets[:, j]
-                    z_col = hull.waterlines_z
-                    if y_c <= np.max(y_col):
-                        z_val = float(np.interp(y_c, y_col, z_col))
+            for b in buttock_curves:
+                z_b = []
+                for xv in xs_eval:
+                    frac = xv / hull.stations_x[-1]
+                    if frac <= 0.45:
+                        # Popa até a meia-nau: quase horizontal/nivelada
+                        z_val = b["z_start"]
                     else:
-                        z_val = float(hull.D)
-                    z_pts_cut.append(z_val)
-                    
-                # Interpolação PCHIP suave sem descontinuidades de ST 00 a ST 10
-                pchip_cut = PchipInterpolator(hull.stations_x, z_pts_cut)
-                z_cut_eval = np.clip(pchip_cut(xs_eval), 0.0, hull.D)
+                        # Meia-nau até a proa: curva suave contínua em leque até o bico de proa (Z = D)
+                        f_proa = (frac - 0.45) / 0.55
+                        z_val = b["z_start"] + (hull.D - b["z_start"]) * (f_proa ** b["power"])
+                    z_b.append(float(z_val))
                 
                 fig.add_trace(go.Scatter(
-                    x=xs_eval, y=z_cut_eval, mode='lines',
-                    name=f"Linha do Alto {cut['name']}",
-                    line=dict(color=cut["color"], width=cut["w"])
+                    x=xs_eval, y=z_b, mode='lines',
+                    name=f"Linha do Alto {b['name']}",
+                    line=dict(color=b["color"], width=b["w"])
                 ))
 
             # Calado Ativo de Análise (T)
