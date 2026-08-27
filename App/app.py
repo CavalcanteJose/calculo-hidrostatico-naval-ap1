@@ -1070,33 +1070,10 @@ else:
                 horizontal=True
             )
 
-        geom_engine_choice = st.radio(
-            "🎛️ Motor de Interpolação e Adoçamento de Superfície:",
-            [
-                "⚡ Motor 1: PCHIP Adoçado Monotônico (SciPy - Ultrarrápido / Recomendado)",
-                "💎 Motor 2: Superfície NURBS & Bicúbica CAD 3D (geomdl + RectBivariateSpline)"
-            ],
-            horizontal=True
-        )
-
         st.write("")
         col_v1, col_v2 = st.columns([1.2, 1])
 
-        use_nurbs = "Motor 2" in geom_engine_choice
-        offsets_mat = np.array([[hull.get_y(j, z) for j in range(len(hull.stations_x))] for z in hull.waterlines_z])
-        try:
-            spline_surf_2d = RectBivariateSpline(
-                hull.waterlines_z, hull.stations_x, offsets_mat,
-                kx=min(3, len(hull.waterlines_z) - 1),
-                ky=min(3, len(hull.stations_x) - 1)
-            )
-        except Exception:
-            spline_surf_2d = None
-
         def eval_hull_y(x_val, z_val):
-            if use_nurbs and spline_surf_2d is not None:
-                val = float(spline_surf_2d(z_val, x_val)[0][0])
-                return max(0.0, val)
             return hull.get_y_continuous(x_val, z_val)
 
         # ----------------------------------------------------------------------
@@ -1142,7 +1119,7 @@ else:
             )
             
             fig.update_layout(
-                title=f"Plano de Balizas (Body Plan) — [{'💎 NURBS / Bicubic CAD' if use_nurbs else '⚡ PCHIP Monotônico'}]",
+                title="Plano de Balizas (Body Plan) — [Esquerda: Popa | Direita: Proa]",
                 xaxis_title="Semi-boca Y (m) [← Bombordo | Boreste →]",
                 yaxis_title="Cota Vertical Z (m) [Linha de Base BL = 0]",
                 template="plotly_dark", height=480, margin=dict(l=20, r=20, t=40, b=20),
@@ -1211,7 +1188,7 @@ else:
             ))
 
             fig.update_layout(
-                title=f"Plano de Linhas d'Água (Half-Breadth Plan) — [{'💎 Superfície NURBS & Bicúbica CAD' if use_nurbs else '⚡ PCHIP Monotônico'}]",
+                title="Plano de Linhas d'Água (Half-Breadth Plan / Vista Superior Completa — Casco Inteiro)",
                 xaxis_title="Comprimento Longitudinal X (m) [PR (Popa) → SM (Meia-Nau) → PV (Proa)]",
                 yaxis_title="Boca Transversal Y (m) [← Bombordo | Boreste →]",
                 template="plotly_dark", height=520, margin=dict(l=25, r=25, t=45, b=25),
@@ -1351,7 +1328,7 @@ else:
             )
 
             fig.update_layout(
-                title=f"Plano de Linhas do Alto (Sheer / Buttocks) — [{'💎 Superfície NURBS & Bicúbica CAD' if use_nurbs else '⚡ PCHIP Monotônico'}]",
+                title="Plano de Linhas do Alto (Sheer / Buttock Plan — Extração Exata Baliza por Baliza)",
                 xaxis_title="Comprimento Longitudinal X (m) [PR (Popa) → SM (Meia-Nau) → PV (Proa)]",
                 yaxis_title="Altura Vertical Z (m) a partir da Linha de Base (LB)",
                 yaxis=dict(range=[-0.05, float(z_deck_dense[-1]) + 0.15]),
