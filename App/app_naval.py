@@ -1209,9 +1209,9 @@ else:
             x_end = float(xs[-1])
             D_nom = float(hull.D)
 
-            # Grade de varredura: 120 posições em X e 100 alturas em Z
-            xs_scan = np.linspace(x0, x_end, 120)
-            zs_scan = np.linspace(0.0, D_nom, 100)
+            # Grade de varredura: 150 posições em X e 80 alturas em Z
+            xs_scan = np.linspace(x0, x_end, 150)
+            zs_scan = np.linspace(0.0, D_nom, 80)
 
             # 1. Grid de Referência
             for j, st_x in enumerate(xs):
@@ -1225,29 +1225,42 @@ else:
                     annotation_text=f"WL {k:02d}" if k > 0 else "LB", annotation_position="left"
                 )
 
-            # 2. Quilha & Roda de Proa (Y = 0)
-            # Lógica análoga ao Plano de Balizas:
-            # Para cada X da varredura densa, encontra a PRIMEIRA altura Z onde Y > 0
-            # Isso traça o perfil inferior/lateral do casco (quilha + roda de proa)
+            # 2. Quilha & Roda de Proa
+            # Regra física: a quilha de uma embarcação com quilha em V fica em Z=0 (linha de base)
+            # ao longo de todo o comprimento até onde a roda de proa começa a subir.
+            # A detecção usa: se a embarcação tem largura em QUALQUER altura Z neste X → quilha em Z=0.
+            # Só não fica em Z=0 quando o casco não existe nem na primeira WL positiva (bico da proa).
             keel_x, keel_z = [], []
             for x in xs_scan:
-                y_profile = np.array([hull.get_y_continuous(x, z) for z in zs_scan])
-                pos = np.where(y_profile > 0.002)[0]
-                if len(pos) == 0:
-                    continue  # Nenhum ponto nesse X (além da proa)
-                if pos[0] == 0:
-                    keel_z.append(0.0)  # Hull existe desde a linha de base
+                # Verifica se o casco existe neste X (alguma Y > 0 em qualquer Z)
+                y_at_top  = hull.get_y_continuous(x, D_nom)
+                y_at_mid  = hull.get_y_continuous(x, D_nom * 0.5)
+                if y_at_top < 0.002 and y_at_mid < 0.002:
+                    continue  # Fora do casco (além do bico de proa)
+
+                # O casco em V tem quilha em Z=0 — só a roda de proa sobe
+                # Detecta roda de proa: quando Y(X, WL01) ainda é zero mas Y(X, D*0.5) > 0
+                y_at_wl01 = hull.get_y_continuous(x, zs[1] if len(zs) > 1 else D_nom * 0.1)
+                y_at_wl02 = hull.get_y_continuous(x, zs[2] if len(zs) > 2 else D_nom * 0.2)
+
+                if y_at_wl01 < 0.002 and y_at_wl02 < 0.002:
+                    # Roda de proa: casco começa a existir apenas em WLs mais altas
+                    # Encontra a primeira WL com Y positivo
+                    y_profile = np.array([hull.get_y_continuous(x, z) for z in zs_scan])
+                    pos = np.where(y_profile > 0.002)[0]
+                    z_keel = float(zs_scan[pos[0]]) if len(pos) > 0 else 0.0
                 else:
-                    # Interpolação no cruzamento Y=0 → primeiro ponto positivo
-                    zi = float(np.interp(0.002, y_profile[:pos[0]+2], zs_scan[:pos[0]+2]))
-                    keel_z.append(zi)
+                    # Corpo do casco: quilha em Z=0
+                    z_keel = 0.0
+
                 keel_x.append(x)
+                keel_z.append(z_keel)
 
             keel_x = np.array(keel_x)
             keel_z = np.array(keel_z)
             z_deck = np.full_like(keel_x, D_nom)
 
-            # 3. Silhueta do Casco (preenchimento entre quilha e convés)
+            # 3. Silhueta do Casco
             sil_x = np.concatenate([keel_x, keel_x[::-1]])
             sil_z = np.concatenate([keel_z, z_deck[::-1]])
             fig.add_trace(go.Scatter(
@@ -1257,24 +1270,24 @@ else:
                 line=dict(color="#fca311", width=3.0)
             ))
 
-            # 4. Espelho de Popa (fechamento vertical)
+            # 4. Espelho de Popa
             fig.add_trace(go.Scatter(
-                x=[x0, x0], y=[keel_z[0], D_nom], mode='lines',
+                x=[x0, x0], y=[0.0, D_nom], mode='lines',
                 name="Espelho de Popa (PR)",
                 line=dict(color="#fca311", width=3.0)
             ))
 
-            # 5. Linha da Quilha & Roda de Proa
+            # 5. Quilha & Roda de Proa (linha branca)
             fig.add_trace(go.Scatter(
                 x=keel_x, y=keel_z, mode='lines',
                 name="Perfil da Quilha & Roda de Proa (Y=0)",
                 line=dict(color="#ffffff", width=3.2)
             ))
 
-            # 6. Linhas do Alto (Cortes A, B, C)
-            # Lógica idêntica ao Plano de Balizas, só invertida:
-            # - Plano de Balizas: X fixo → varia Z → lê Y(X, Z)
-            # - Linhas do Alto:   Y fixo → varia X → encontra Z onde Y(X,Z)=Yc
+            # 6. Linhas do Alto (Cortes A, B, C) — varredura contínua 2D
+            # Análogo invertido do Plano de Balizas:
+            # Balizas: X fixo, varia Z, lê Y(X,Z)
+            # Linhas do Alto: Y fixo, varia X, encontra Z onde Y(X,Z)=Yc
             cuts_specs = [
                 {"name": "Corte A (Y = 1/6 B)", "y": hull.B * 0.1667, "color": "#f43f5e"},
                 {"name": "Corte B (Y = 1/3 B)", "y": hull.B * 0.3333, "color": "#fb923c"},
@@ -1286,14 +1299,9 @@ else:
                 pts_x, pts_z = [], []
 
                 for x in xs_scan:
-                    # Para este X: calcula o perfil Y(Z) de forma contínua em 2D
                     y_profile = np.array([hull.get_y_continuous(x, z) for z in zs_scan])
-
                     if np.max(y_profile) < yc:
-                        continue  # Corte yc não existe neste X
-
-                    # Encontra Z onde Y(X, Z) = yc por interpolação linear inversa
-                    # Y cresce de 0 (base) até o máximo → np.interp funciona corretamente
+                        continue
                     z_found = float(np.interp(yc, y_profile, zs_scan))
                     pts_x.append(x)
                     pts_z.append(z_found)
