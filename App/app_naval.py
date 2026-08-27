@@ -1208,166 +1208,111 @@ else:
             x0 = float(xs[0])
             x_end = float(xs[-1])
             D_nom = float(hull.D)
-            xs_dense = np.linspace(x0, x_end, 200)
 
-            # 1. Grid Oficial de Referência (Estações ST em vermelho e Linhas d'Água WL em azul)
+            # Grade de varredura: 120 posições em X e 100 alturas em Z
+            xs_scan = np.linspace(x0, x_end, 120)
+            zs_scan = np.linspace(0.0, D_nom, 100)
+
+            # 1. Grid de Referência
             for j, st_x in enumerate(xs):
                 fig.add_vline(
                     x=st_x, line_dash="solid", line_color="rgba(239, 68, 68, 0.45)", line_width=1.2,
                     annotation_text=f"ST {j:02d}", annotation_position="top"
                 )
-
             for k, wz in enumerate(zs):
                 fig.add_hline(
                     y=wz, line_dash="solid", line_color="rgba(59, 130, 246, 0.35)", line_width=1.0,
                     annotation_text=f"WL {k:02d}" if k > 0 else "LB", annotation_position="left"
                 )
 
-            # 2. Linha de Convés (Leitura Direta do Topo da Tabela de Cotas)
-            z_deck_dense = np.full_like(xs_dense, D_nom)
-
-            # 3. Perfil de Quilha & Roda de Proa — extraído ponto a ponto da tabela
-            raw_stem_x = [x0]
-            raw_stem_z = [0.0]
-            prev_x = x0
-            for k in range(len(zs)):
-                row_k = [hull.get_y(j, zs[k]) for j in range(len(xs))]
-                pos_idx = np.where(np.array(row_k) > 0.001)[0]
-                if len(pos_idx) > 0 and pos_idx[-1] < len(xs) - 1:
-                    li = pos_idx[-1]
-                    y_a, y_b = row_k[li], row_k[li + 1]
-                    x_stem = float(xs[li] + (xs[li + 1] - xs[li]) * (y_a / (y_a - y_b + 1e-9)))
+            # 2. Quilha & Roda de Proa (Y = 0)
+            # Lógica análoga ao Plano de Balizas:
+            # Para cada X da varredura densa, encontra a PRIMEIRA altura Z onde Y > 0
+            # Isso traça o perfil inferior/lateral do casco (quilha + roda de proa)
+            keel_x, keel_z = [], []
+            for x in xs_scan:
+                y_profile = np.array([hull.get_y_continuous(x, z) for z in zs_scan])
+                pos = np.where(y_profile > 0.002)[0]
+                if len(pos) == 0:
+                    continue  # Nenhum ponto nesse X (além da proa)
+                if pos[0] == 0:
+                    keel_z.append(0.0)  # Hull existe desde a linha de base
                 else:
-                    x_stem = x_end
+                    # Interpolação no cruzamento Y=0 → primeiro ponto positivo
+                    zi = float(np.interp(0.002, y_profile[:pos[0]+2], zs_scan[:pos[0]+2]))
+                    keel_z.append(zi)
+                keel_x.append(x)
 
-                if x_stem > prev_x + 0.05:
-                    raw_stem_x.append(x_stem)
-                    raw_stem_z.append(float(zs[k]))
-                    prev_x = x_stem
+            keel_x = np.array(keel_x)
+            keel_z = np.array(keel_z)
+            z_deck = np.full_like(keel_x, D_nom)
 
-            if raw_stem_x[-1] < x_end - 0.1:
-                raw_stem_x.append(x_end)
-                raw_stem_z.append(D_nom)
-
-            keel_curve_x = raw_stem_x[:-1]
-            keel_curve_z = raw_stem_z[:-1]
-            stem_top_x   = raw_stem_x[-2:]
-            stem_top_z   = raw_stem_z[-2:]
-
-            if len(keel_curve_x) >= 2:
-                pchip_keel = PchipInterpolator(keel_curve_x, keel_curve_z)
-                xs_keel_smooth = np.linspace(keel_curve_x[0], keel_curve_x[-1], 150)
-                zs_keel_smooth = pchip_keel(xs_keel_smooth)
-                xs_keel_full = np.concatenate([xs_keel_smooth, np.array(stem_top_x)])
-                zs_keel_full = np.concatenate([zs_keel_smooth, np.array(stem_top_z)])
-            else:
-                xs_keel_full = np.array(raw_stem_x)
-                zs_keel_full = np.array(raw_stem_z)
-
-            # 4. Silhueta Lateral do Casco
-            xs_silhouette = np.concatenate([xs_keel_full, xs_dense[::-1]])
-            zs_silhouette = np.concatenate([zs_keel_full, z_deck_dense[::-1]])
+            # 3. Silhueta do Casco (preenchimento entre quilha e convés)
+            sil_x = np.concatenate([keel_x, keel_x[::-1]])
+            sil_z = np.concatenate([keel_z, z_deck[::-1]])
             fig.add_trace(go.Scatter(
-                x=xs_silhouette, y=zs_silhouette, mode='lines',
+                x=sil_x, y=sil_z, mode='lines',
                 fill='toself', fillcolor='rgba(59, 130, 246, 0.10)',
                 name="Silhueta Lateral do Casco",
                 line=dict(color="#fca311", width=3.0)
             ))
 
-            # 5. Espelho de Popa (ST 00)
+            # 4. Espelho de Popa (fechamento vertical)
             fig.add_trace(go.Scatter(
-                x=[x0, x0], y=[0.0, D_nom], mode='lines',
+                x=[x0, x0], y=[keel_z[0], D_nom], mode='lines',
                 name="Espelho de Popa (PR)",
                 line=dict(color="#fca311", width=3.0)
             ))
 
-            # 6. Quilha & Roda de Proa
+            # 5. Linha da Quilha & Roda de Proa
             fig.add_trace(go.Scatter(
-                x=xs_keel_full, y=zs_keel_full, mode='lines',
+                x=keel_x, y=keel_z, mode='lines',
                 name="Perfil da Quilha & Roda de Proa (Y=0)",
                 line=dict(color="#ffffff", width=3.2)
             ))
 
-            # 7. Linhas do Alto
+            # 6. Linhas do Alto (Cortes A, B, C)
+            # Lógica idêntica ao Plano de Balizas, só invertida:
+            # - Plano de Balizas: X fixo → varia Z → lê Y(X, Z)
+            # - Linhas do Alto:   Y fixo → varia X → encontra Z onde Y(X,Z)=Yc
             cuts_specs = [
                 {"name": "Corte A (Y = 1/6 B)", "y": hull.B * 0.1667, "color": "#f43f5e"},
                 {"name": "Corte B (Y = 1/3 B)", "y": hull.B * 0.3333, "color": "#fb923c"},
                 {"name": "Corte C (Y = 1/2 B)", "y": hull.B * 0.4900, "color": "#38bdf8"}
             ]
 
-            deck_row = [hull.get_y(j, D_nom) for j in range(len(xs))]
-
             for cut in cuts_specs:
                 yc = cut["y"]
                 pts_x, pts_z = [], []
 
-                # Lê cada coluna j da tabela e interpola Z onde aquela baliza atinge yc
-                for j in range(len(xs)):
-                    col_j = np.array([hull.get_y(j, z) for z in zs])
-                    if np.max(col_j) < yc:
-                        continue
-                    zj = float(np.interp(yc, col_j, zs))
-                    pts_x.append(float(xs[j]))
-                    pts_z.append(zj)
+                for x in xs_scan:
+                    # Para este X: calcula o perfil Y(Z) de forma contínua em 2D
+                    y_profile = np.array([hull.get_y_continuous(x, z) for z in zs_scan])
 
-                if len(pts_x) < 2:
-                    continue
+                    if np.max(y_profile) < yc:
+                        continue  # Corte yc não existe neste X
 
-                # Fecha no convés à proa (onde a largura do convés estreita até yc)
-                last_x = pts_x[-1]
-                if pts_z[-1] < D_nom - 0.05:
-                    for j in range(len(xs) - 1, -1, -1):
-                        if deck_row[j] >= yc:
-                            if j + 1 < len(xs):
-                                x_term = float(np.interp(
-                                    yc, [deck_row[j + 1], deck_row[j]], [xs[j + 1], xs[j]]
-                                ))
-                            else:
-                                x_term = float(xs[j])
-                            if x_term > last_x:
-                                pts_x.append(x_term)
-                                pts_z.append(D_nom)
-                            break
+                    # Encontra Z onde Y(X, Z) = yc por interpolação linear inversa
+                    # Y cresce de 0 (base) até o máximo → np.interp funciona corretamente
+                    z_found = float(np.interp(yc, y_profile, zs_scan))
+                    pts_x.append(x)
+                    pts_z.append(z_found)
 
-                # Fecha no convés à popa (onde a largura do convés estreita até yc)
-                first_x = pts_x[0]
-                if pts_z[0] < D_nom - 0.05:
-                    for j in range(len(xs)):
-                        if deck_row[j] >= yc:
-                            if j > 0:
-                                x_start = float(np.interp(
-                                    yc, [deck_row[j - 1], deck_row[j]], [xs[j - 1], xs[j]]
-                                ))
-                            else:
-                                x_start = float(xs[j])
-                            if x_start < first_x:
-                                pts_x.insert(0, x_start)
-                                pts_z.insert(0, D_nom)
-                            break
+                if len(pts_x) >= 2:
+                    fig.add_trace(go.Scatter(
+                        x=pts_x, y=pts_z, mode='lines',
+                        name=f"Linha do Alto {cut['name']}",
+                        line=dict(color=cut["color"], width=2.6)
+                    ))
 
-                pchip_cut = PchipInterpolator(pts_x, pts_z)
-                xs_cut_dense = np.linspace(pts_x[0], pts_x[-1], 100)
-                zs_cut_dense = pchip_cut(xs_cut_dense)
-
-                fig.add_trace(go.Scatter(
-                    x=xs_cut_dense, y=zs_cut_dense, mode='lines',
-                    name=f"Linha do Alto {cut['name']}",
-                    line=dict(color=cut["color"], width=2.6)
-                ))
-                fig.add_trace(go.Scatter(
-                    x=pts_x, y=pts_z, mode='markers',
-                    marker=dict(size=6, color=cut["color"], symbol='circle'),
-                    showlegend=False
-                ))
-
-            # 8. Calado Ativo de Análise (T)
+            # 7. Calado de Análise
             fig.add_hline(
                 y=viz_draft, line_dash="dash", line_color="#00f5d4", line_width=2.5,
                 annotation_text=f"Calado T = {viz_draft:.2f}m", annotation_position="bottom right"
             )
 
             fig.update_layout(
-                title="Plano de Linhas do Alto (Sheer / Buttock Plan — Extração Direta Ponto a Ponto da Tabela)",
+                title="Plano de Linhas do Alto (Sheer / Buttock Plan — Varredura Contínua 2D)",
                 xaxis_title="Comprimento Longitudinal X (m) [PR (Popa) → SM (Meia-Nau) → PV (Proa)]",
                 yaxis_title="Altura Vertical Z (m) a partir da Linha de Base (LB)",
                 yaxis=dict(range=[-0.05, D_nom + 0.15]),
