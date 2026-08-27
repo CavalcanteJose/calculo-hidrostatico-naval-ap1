@@ -942,9 +942,10 @@ else:
                 "🧭 Selecione a Vista 2D para Exibição:",
                 [
                     "⚓ Plano de Balizas (Body Plan - Vante/Ré)",
-                    "🌊 Plano de Linhas d'Água (Waterlines)",
-                    "📐 Plano de Linhas do Alto / Perfil (Sheer)",
-                    "📑 Vista Completa (Tríptico Naval 2D)"
+                    "🌊 Plano de Linhas d'Água (Half-Breadth Plan)",
+                    "📐 Plano de Linhas do Alto (Sheer / Buttocks - Lateral Inteira)",
+                    "🌐 Vista Longitudinal das Linhas d'Água (Profile View)",
+                    "📑 Vista Completa (Tríptico Naval Unificado)"
                 ],
                 horizontal=True
             )
@@ -1024,7 +1025,6 @@ else:
                 fig.add_hline(y=-cy, line_dash="dot", line_color="rgba(148, 163, 184, 0.30)", line_width=1.0)
 
             # 2. Traçar Linhas d'Água (WL 00 a WL 10) — Seccionamento Horizontal Real da Superfície 3D
-            # Conforme método Paulo Abreu: lâminas horizontais cortando a casca 3D em toda a extensão
             colors_wl = [
                 "#e879f9", "#c084fc", "#a855f7", "#818cf8", "#6366f1",
                 "#3b82f6", "#0ea5e9", "#06b6d4", "#14b8a6", "#10b981", "#38bdf8"
@@ -1033,10 +1033,7 @@ else:
             for k, wz in enumerate(hull.waterlines_z):
                 if wz <= 0.0:
                     continue
-                # Meias-bocas extraídas diretamente da superfície contínua do casco
                 ys_half = np.array([hull.get_y_continuous(xv, wz) for xv in xs_eval])
-                
-                # Plota a linha d'água simétrica completa (Boreste +Y e Bombordo -Y)
                 x_full = np.concatenate([xs_eval, xs_eval[::-1]])
                 y_full = np.concatenate([ys_half, -ys_half[::-1]])
                 
@@ -1078,8 +1075,8 @@ else:
 
         def get_sheer_figure():
             fig = go.Figure()
-            xs_eval = np.linspace(hull.stations_x[0], hull.stations_x[-1], 160)
-            z_search = np.linspace(hull.waterlines_z[0], hull.D, 80)
+            xs_eval = np.linspace(hull.stations_x[0], hull.stations_x[-1], 200)
+            z_search = np.linspace(hull.waterlines_z[0], hull.D, 100)
             
             # 1. Malha de Referência (Grid): Balizas verticais e Linhas d'Água horizontais
             for j, st_x in enumerate(hull.stations_x):
@@ -1095,7 +1092,6 @@ else:
                 )
 
             # 2. Contorno do Perfil da Quilha & Roda de Proa (Linha de Centro Y = 0)
-            # Encontra o ponto inferior real da casca ao longo de todo o comprimento
             z_keel = []
             for xv in xs_eval:
                 y_col = np.array([hull.get_y_continuous(xv, zi) for zi in z_search])
@@ -1107,7 +1103,6 @@ else:
                 z_keel.append(float(z_bottom))
             z_keel = np.array(z_keel)
 
-            # Linha de Convés / Borda Livre (Sheer Line Superior Real)
             z_deck = np.full_like(xs_eval, hull.D)
 
             # 3. Silhueta Lateral do Casco (Preenchimento Completo 2D)
@@ -1136,31 +1131,33 @@ else:
                 line=dict(color="#ffffff", width=3.2)
             ))
 
-            # 6. Linhas do Alto (Cortes Longitudinais I, II e III) — Seccionamento Vertical da Superfície 3D
-            # Conforme método do Paulo Abreu / Rhino: secciona a casca 3D no afastamento Y_c
-            cuts_specs = [
-                {"name": "Corte I (Y = 1/6 B)", "y": hull.B * 0.1667, "color": "#c084fc", "w": 2.5},
-                {"name": "Corte II (Y = 1/3 B)", "y": hull.B * 0.3333, "color": "#f43f5e", "w": 2.5},
-                {"name": "Corte III (Y = 1/2 B)", "y": hull.B * 0.4900, "color": "#38bdf8", "w": 2.5}
-            ]
+            # 6. Linhas do Alto em Cascata (Buttocks Padrão SNU / Slides 10 e 11)
+            # Gera 7 cortes longitudinais cobrindo toda a extensão (Popa, Meia-Nau e Proa)
+            half_b = hull.B / 2.0
+            buttock_fractions = [0.08, 0.20, 0.35, 0.50, 0.65, 0.80, 0.95]
+            colors_buttocks = ["#f43f5e", "#fb923c", "#facc15", "#4ade80", "#2dd4bf", "#38bdf8", "#c084fc"]
 
-            for cut in cuts_specs:
-                y_c = cut["y"]
+            for frac_y, c_col in zip(buttock_fractions, colors_buttocks):
+                y_c = half_b * frac_y
                 pts_x, pts_z = [], []
                 
                 for xv in xs_eval:
                     y_at_z = np.array([hull.get_y_continuous(xv, zi) for zi in z_search])
                     if np.max(y_at_z) >= y_c:
-                        # Altura Z exata onde a superfície atinge y_c
-                        z_val = float(np.interp(y_c, y_at_z, z_search))
+                        # Se o fundo plano já tem largura >= y_c, fica nivelado na quilha/base (z = 0)
+                        if y_at_z[0] >= y_c:
+                            z_val = 0.0
+                        else:
+                            # Sobe suavemente ao longo da curva da baliza
+                            z_val = float(np.interp(y_c, y_at_z, z_search))
                         pts_x.append(xv)
                         pts_z.append(z_val)
                         
                 if len(pts_x) >= 4:
                     fig.add_trace(go.Scatter(
                         x=pts_x, y=pts_z, mode='lines',
-                        name=f"Linha do Alto {cut['name']} (y={y_c:.2f}m)",
-                        line=dict(color=cut["color"], width=cut["w"])
+                        name=f"Linha do Alto Y={y_c:.2f}m ({frac_y*100:.0f}% B/2)",
+                        line=dict(color=c_col, width=2.2)
                     ))
 
             # 7. Calado Ativo de Análise (T)
@@ -1170,12 +1167,84 @@ else:
             )
 
             fig.update_layout(
-                title="Plano de Linhas do Alto (Sheer / Buttock Plan — Vista Lateral Completa do Casco)",
+                title="Plano de Linhas do Alto (Sheer / Buttock Plan — Vista Lateral Inteira Popa-Proa)",
                 xaxis_title="Comprimento Longitudinal X (m) [PR (Popa) → SM (Meia-Nau) → PV (Proa)]",
                 yaxis_title="Altura Vertical Z (m) a partir da Linha de Base (LB)",
                 yaxis=dict(range=[-0.05, float(hull.D) + 0.1]),
                 template="plotly_dark", height=520, margin=dict(l=25, r=25, t=45, b=25),
-                legend=dict(orientation="h", yanchor="bottom", y=-0.38, xanchor="center", x=0.5)
+                legend=dict(orientation="h", yanchor="bottom", y=-0.42, xanchor="center", x=0.5)
+            )
+            return fig
+
+        def get_waterlines_longitudinal_figure():
+            fig = go.Figure()
+            xs_eval = np.linspace(hull.stations_x[0], hull.stations_x[-1], 200)
+            z_search = np.linspace(hull.waterlines_z[0], hull.D, 100)
+            
+            # Grid de Balizas verticais
+            for j, st_x in enumerate(hull.stations_x):
+                fig.add_vline(
+                    x=st_x, line_dash="solid", line_color="rgba(239, 68, 68, 0.45)", line_width=1.2,
+                    annotation_text=f"ST {j:02d}", annotation_position="top"
+                )
+
+            # Silhueta Lateral do Casco
+            z_keel = []
+            for xv in xs_eval:
+                y_col = np.array([hull.get_y_continuous(xv, zi) for zi in z_search])
+                pos_idx = np.where(y_col > 0.005)[0]
+                z_bottom = z_search[pos_idx[0]] if len(pos_idx) > 0 and pos_idx[0] > 0 else 0.0
+                z_keel.append(float(z_bottom))
+            z_keel = np.array(z_keel)
+            z_deck = np.full_like(xs_eval, hull.D)
+
+            fig.add_trace(go.Scatter(
+                x=xs_eval, y=z_keel, mode='lines',
+                line=dict(color="rgba(0,0,0,0)"), showlegend=False
+            ))
+            fig.add_trace(go.Scatter(
+                x=xs_eval, y=z_deck, mode='lines',
+                fill='tonexty', fillcolor='rgba(59, 130, 246, 0.08)',
+                name="Perfil do Casco",
+                line=dict(color="#fca311", width=2.8)
+            ))
+
+            # Contorno da Roda de Proa e Quilha
+            fig.add_trace(go.Scatter(
+                x=xs_eval, y=z_keel, mode='lines',
+                name="Quilha & Roda de Proa",
+                line=dict(color="#ffffff", width=3.0)
+            ))
+
+            # Traçado das Linhas d'Água no Perfil Longitudinal (WL 00 a WL 10)
+            colors_wl = ["#e879f9", "#c084fc", "#a855f7", "#818cf8", "#6366f1", "#3b82f6", "#0ea5e9", "#06b6d4", "#14b8a6", "#10b981", "#38bdf8"]
+            for k, wz in enumerate(hull.waterlines_z):
+                # Determina onde o casco existe na cota wz
+                x_in_wl = [xv for xv in xs_eval if hull.get_y_continuous(xv, wz) > 0.005]
+                if len(x_in_wl) >= 2:
+                    fig.add_trace(go.Scatter(
+                        x=[x_in_wl[0], x_in_wl[-1]], y=[wz, wz], mode='lines+markers',
+                        name=f"WL {k:02d} (z={wz:.2f}m)",
+                        line=dict(color=colors_wl[k % len(colors_wl)], width=2.4),
+                        marker=dict(size=5)
+                    ))
+
+            # Linha e Área Submersa no Calado Ativo
+            x_sub = [xv for xv in xs_eval if hull.get_y_continuous(xv, viz_draft) > 0.005]
+            if len(x_sub) >= 2:
+                fig.add_trace(go.Scatter(
+                    x=[x_sub[0], x_sub[-1]], y=[viz_draft, viz_draft], mode='lines',
+                    name=f"★ Linha d'Água Ativa T={viz_draft:.2f}m",
+                    line=dict(color="#00f5d4", width=3.5, dash='dash')
+                ))
+
+            fig.update_layout(
+                title="Vista Longitudinal das Linhas d'Água (Waterlines Profile View — Casco Inteiro)",
+                xaxis_title="Comprimento Longitudinal X (m) [PR (Popa) → SM (Meia-Nau) → PV (Proa)]",
+                yaxis_title="Altura Vertical Z (m) a partir da Linha de Base (LB)",
+                yaxis=dict(range=[-0.05, float(hull.D) + 0.1]),
+                template="plotly_dark", height=520, margin=dict(l=25, r=25, t=45, b=25),
+                legend=dict(orientation="h", yanchor="bottom", y=-0.42, xanchor="center", x=0.5)
             )
             return fig
 
@@ -1185,17 +1254,21 @@ else:
         with col_v1:
             if view_2d_choice == "⚓ Plano de Balizas (Body Plan - Vante/Ré)":
                 st.plotly_chart(get_body_plan_figure(), use_container_width=True)
-            elif view_2d_choice == "🌊 Plano de Linhas d'Água (Waterlines)":
+            elif view_2d_choice == "🌊 Plano de Linhas d'Água (Half-Breadth Plan)":
                 st.plotly_chart(get_waterlines_figure(), use_container_width=True)
-            elif view_2d_choice == "📐 Plano de Linhas do Alto / Perfil (Sheer)":
+            elif view_2d_choice == "📐 Plano de Linhas do Alto (Sheer / Buttocks - Lateral Inteira)":
                 st.plotly_chart(get_sheer_figure(), use_container_width=True)
+            elif view_2d_choice == "🌐 Vista Longitudinal das Linhas d'Água (Profile View)":
+                st.plotly_chart(get_waterlines_longitudinal_figure(), use_container_width=True)
             else:
                 st.markdown("##### 1. Plano de Balizas (Body Plan)")
                 st.plotly_chart(get_body_plan_figure(), use_container_width=True)
-                st.markdown("##### 2. Plano de Linhas d'Água (Waterlines)")
+                st.markdown("##### 2. Plano de Linhas d'Água (Half-Breadth Plan)")
                 st.plotly_chart(get_waterlines_figure(), use_container_width=True)
-                st.markdown("##### 3. Plano de Linhas do Alto (Perfil)")
+                st.markdown("##### 3. Plano de Linhas do Alto (Sheer / Buttocks)")
                 st.plotly_chart(get_sheer_figure(), use_container_width=True)
+                st.markdown("##### 4. Vista Longitudinal das Linhas d'Água (Profile)")
+                st.plotly_chart(get_waterlines_longitudinal_figure(), use_container_width=True)
 
         with col_v2:
             st.markdown("#### Casco Tridimensional (3D Mesh Suave)")
