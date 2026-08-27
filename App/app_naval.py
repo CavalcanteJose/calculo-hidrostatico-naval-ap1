@@ -1061,17 +1061,15 @@ else:
             view_2d_choice = st.radio(
                 "🧭 Selecione a Vista 2D para Exibição:",
                 [
+                    "📐 Plano de Linhas do Alto (Sheer / Buttocks - Lateral Inteira)",
                     "⚓ Plano de Balizas (Body Plan - Vante/Ré)",
                     "🌊 Plano de Linhas d'Água (Half-Breadth Plan)",
-                    "📐 Plano de Linhas do Alto (Sheer / Buttocks - Lateral Inteira)",
-                    "🌐 Vista Longitudinal das Linhas d'Água (Profile View)",
                     "📑 Vista Completa (Tríptico Naval Unificado)"
                 ],
                 horizontal=True
             )
 
         st.write("")
-        col_v1, col_v2 = st.columns([1.2, 1])
 
         def eval_hull_y(x_val, z_val):
             return hull.get_y_continuous(x_val, z_val)
@@ -1158,7 +1156,6 @@ else:
             for k, wz in enumerate(zs):
                 if wz <= 0.0:
                     continue
-                # Lê a linha k exata da matriz de cotas
                 row_y = [hull.get_y(j, wz) for j in range(len(xs))]
                 pchip_row = PchipInterpolator(xs, row_y)
                 ys_eval = pchip_row(xs_eval)
@@ -1196,7 +1193,7 @@ else:
             ))
 
             fig.update_layout(
-                title="Plano de Linhas d'Água (Half-Breadth Plan — Extração Direta das Linhas da Tabela de Cotas)",
+                title="Plano de Linhas d'Água (Half-Breadth Plan — Vista Superior Completa)",
                 xaxis_title="Comprimento Longitudinal X (m) [PR (Popa) → SM (Meia-Nau) → PV (Proa)]",
                 yaxis_title="Boca Transversal Y (m) [← Bombordo | Boreste →]",
                 template="plotly_dark", height=520, margin=dict(l=25, r=25, t=45, b=25),
@@ -1231,7 +1228,6 @@ else:
             z_deck_dense = np.full_like(xs_dense, D_nom)
 
             # 3. Perfil da Quilha & Roda de Proa (Y = 0 — Contorno Externo Máximo do Casco)
-            # Fundo plano na Linha de Base (Z = 0) e arco suave na Roda de Proa até o bico de proa em ST 10 (Z = D)
             z_keel_dense = np.zeros_like(xs_dense)
             x_stem_start = x0 + 0.52 * L_total
             for i, x in enumerate(xs_dense):
@@ -1267,23 +1263,23 @@ else:
                 line=dict(color="#ffffff", width=3.2)
             ))
 
-            # 7. Linhas do Alto em Cascata Perfeita (Cortes A, B e C — Nascem em ST 00 e Sobem ao Convés)
+            # 7. Linhas do Alto em Fundo Nivelado e Cascata de Proa (Conforme Desenho Técnico Oficial)
             buttock_configs = [
                 {
                     "name": "Corte A (Y = 1/6 B)",
-                    "z_start_frac": 0.06, "z_mid_frac": 0.02,
+                    "z_bottom_frac": 0.04,
                     "x_trans_frac": 0.50, "x_term_frac": 0.96,
                     "color": "#f43f5e", "w": 2.6
                 },
                 {
                     "name": "Corte B (Y = 1/3 B)",
-                    "z_start_frac": 0.18, "z_mid_frac": 0.08,
+                    "z_bottom_frac": 0.12,
                     "x_trans_frac": 0.45, "x_term_frac": 0.88,
                     "color": "#fb923c", "w": 2.6
                 },
                 {
                     "name": "Corte C (Y = 1/2 B)",
-                    "z_start_frac": 0.45, "z_mid_frac": 0.25,
+                    "z_bottom_frac": 0.28,
                     "x_trans_frac": 0.40, "x_term_frac": 0.77,
                     "color": "#38bdf8", "w": 2.6
                 }
@@ -1292,19 +1288,19 @@ else:
             for cfg in buttock_configs:
                 x_term = x0 + cfg["x_term_frac"] * L_total
                 x_trans = x0 + cfg["x_trans_frac"] * L_total
-                z_start = cfg["z_start_frac"] * D_nom
-                z_mid = cfg["z_mid_frac"] * D_nom
+                z_bot = cfg["z_bottom_frac"] * D_nom
                 
                 xs_cut = np.linspace(x0, x_term, 140)
                 zs_cut = np.zeros_like(xs_cut)
                 
                 for i, x in enumerate(xs_cut):
                     if x <= x_trans:
-                        f = (x - x0) / (x_trans - x0)
-                        zs_cut[i] = z_mid + (z_start - z_mid) * ((1.0 - f) ** 1.5)
+                        # Corre nivelado/plano pelo fundo da popa até a meia-nau
+                        zs_cut[i] = z_bot
                     else:
+                        # Sobe suavemente em arco de concordância até o convés
                         f = (x - x_trans) / (x_term - x_trans)
-                        zs_cut[i] = z_mid + (D_nom - z_mid) * (f ** 2.2)
+                        zs_cut[i] = z_bot + (D_nom - z_bot) * (f ** 2.2)
                         
                 fig.add_trace(go.Scatter(
                     x=xs_cut, y=zs_cut, mode='lines',
@@ -1319,145 +1315,73 @@ else:
             )
 
             fig.update_layout(
-                title="Plano de Linhas do Alto (Sheer / Buttock Plan — Vista Lateral Completa Popa-Proa)",
+                title="Plano de Linhas do Alto (Sheer / Buttock Plan — Perfil Lateral Completo Popa-Proa)",
                 xaxis_title="Comprimento Longitudinal X (m) [PR (Popa) → SM (Meia-Nau) → PV (Proa)]",
                 yaxis_title="Altura Vertical Z (m) a partir da Linha de Base (LB)",
                 yaxis=dict(range=[-0.05, D_nom + 0.15]),
-                template="plotly_dark", height=520, margin=dict(l=25, r=25, t=45, b=25),
-                legend=dict(orientation="h", yanchor="bottom", y=-0.42, xanchor="center", x=0.5)
-            )
-            return fig
-
-        def get_waterlines_longitudinal_figure():
-            fig = go.Figure()
-            xs_eval = np.linspace(hull.stations_x[0], hull.stations_x[-1], 200)
-            z_search = np.linspace(hull.waterlines_z[0], hull.D, 100)
-            
-            # Grid de Balizas verticais
-            for j, st_x in enumerate(hull.stations_x):
-                fig.add_vline(
-                    x=st_x, line_dash="solid", line_color="rgba(239, 68, 68, 0.45)", line_width=1.2,
-                    annotation_text=f"ST {j:02d}", annotation_position="top"
-                )
-
-            # Silhueta Lateral do Casco
-            z_keel = []
-            for xv in xs_eval:
-                y_col = np.array([hull.get_y_continuous(xv, zi) for zi in z_search])
-                pos_idx = np.where(y_col > 0.005)[0]
-                z_bottom = z_search[pos_idx[0]] if len(pos_idx) > 0 and pos_idx[0] > 0 else 0.0
-                z_keel.append(float(z_bottom))
-            z_keel = np.array(z_keel)
-            z_deck = np.full_like(xs_eval, hull.D)
-
-            fig.add_trace(go.Scatter(
-                x=xs_eval, y=z_keel, mode='lines',
-                line=dict(color="rgba(0,0,0,0)"), showlegend=False
-            ))
-            fig.add_trace(go.Scatter(
-                x=xs_eval, y=z_deck, mode='lines',
-                fill='tonexty', fillcolor='rgba(59, 130, 246, 0.08)',
-                name="Perfil do Casco",
-                line=dict(color="#fca311", width=2.8)
-            ))
-
-            # Contorno da Roda de Proa e Quilha
-            fig.add_trace(go.Scatter(
-                x=xs_eval, y=z_keel, mode='lines',
-                name="Quilha & Roda de Proa",
-                line=dict(color="#ffffff", width=3.0)
-            ))
-
-            # Traçado das Linhas d'Água no Perfil Longitudinal (WL 00 a WL 10)
-            colors_wl = ["#e879f9", "#c084fc", "#a855f7", "#818cf8", "#6366f1", "#3b82f6", "#0ea5e9", "#06b6d4", "#14b8a6", "#10b981", "#38bdf8"]
-            for k, wz in enumerate(hull.waterlines_z):
-                # Determina onde o casco existe na cota wz
-                x_in_wl = [xv for xv in xs_eval if hull.get_y_continuous(xv, wz) > 0.005]
-                if len(x_in_wl) >= 2:
-                    fig.add_trace(go.Scatter(
-                        x=[x_in_wl[0], x_in_wl[-1]], y=[wz, wz], mode='lines+markers',
-                        name=f"WL {k:02d} (z={wz:.2f}m)",
-                        line=dict(color=colors_wl[k % len(colors_wl)], width=2.4),
-                        marker=dict(size=5)
-                    ))
-
-            # Linha e Área Submersa no Calado Ativo
-            x_sub = [xv for xv in xs_eval if hull.get_y_continuous(xv, viz_draft) > 0.005]
-            if len(x_sub) >= 2:
-                fig.add_trace(go.Scatter(
-                    x=[x_sub[0], x_sub[-1]], y=[viz_draft, viz_draft], mode='lines',
-                    name=f"★ Linha d'Água Ativa T={viz_draft:.2f}m",
-                    line=dict(color="#00f5d4", width=3.5, dash='dash')
-                ))
-
-            fig.update_layout(
-                title="Vista Longitudinal das Linhas d'Água (Waterlines Profile View — Casco Inteiro)",
-                xaxis_title="Comprimento Longitudinal X (m) [PR (Popa) → SM (Meia-Nau) → PV (Proa)]",
-                yaxis_title="Altura Vertical Z (m) a partir da Linha de Base (LB)",
-                yaxis=dict(range=[-0.05, float(hull.D) + 0.1]),
-                template="plotly_dark", height=520, margin=dict(l=25, r=25, t=45, b=25),
+                template="plotly_dark", height=500, margin=dict(l=25, r=25, t=45, b=25),
                 legend=dict(orientation="h", yanchor="bottom", y=-0.42, xanchor="center", x=0.5)
             )
             return fig
 
         # ----------------------------------------------------------------------
-        # EXIBIÇÃO NO PAINEL PRINCIPAL
+        # EXIBIÇÃO NO PAINEL PRINCIPAL (LARGURA TOTAL 100% PARA O PLANO DE LINHAS)
         # ----------------------------------------------------------------------
-        with col_v1:
-            if view_2d_choice == "⚓ Plano de Balizas (Body Plan - Vante/Ré)":
-                st.plotly_chart(get_body_plan_figure(), use_container_width=True)
-            elif view_2d_choice == "🌊 Plano de Linhas d'Água (Half-Breadth Plan)":
-                st.plotly_chart(get_waterlines_figure(), use_container_width=True)
-            elif view_2d_choice == "📐 Plano de Linhas do Alto (Sheer / Buttocks - Lateral Inteira)":
-                st.plotly_chart(get_sheer_figure(), use_container_width=True)
-            elif view_2d_choice == "🌐 Vista Longitudinal das Linhas d'Água (Profile View)":
-                st.plotly_chart(get_waterlines_longitudinal_figure(), use_container_width=True)
-            else:
-                st.markdown("##### 1. Plano de Balizas (Body Plan)")
-                st.plotly_chart(get_body_plan_figure(), use_container_width=True)
-                st.markdown("##### 2. Plano de Linhas d'Água (Half-Breadth Plan)")
-                st.plotly_chart(get_waterlines_figure(), use_container_width=True)
-                st.markdown("##### 3. Plano de Linhas do Alto (Sheer / Buttocks)")
-                st.plotly_chart(get_sheer_figure(), use_container_width=True)
-                st.markdown("##### 4. Vista Longitudinal das Linhas d'Água (Profile)")
-                st.plotly_chart(get_waterlines_longitudinal_figure(), use_container_width=True)
+        st.markdown("#### 📐 Projeções Bidimensionais (Plano de Linhas)")
+        if view_2d_choice == "📐 Plano de Linhas do Alto (Sheer / Buttocks - Lateral Inteira)":
+            st.plotly_chart(get_sheer_figure(), use_container_width=True)
+        elif view_2d_choice == "⚓ Plano de Balizas (Body Plan - Vante/Ré)":
+            st.plotly_chart(get_body_plan_figure(), use_container_width=True)
+        elif view_2d_choice == "🌊 Plano de Linhas d'Água (Half-Breadth Plan)":
+            st.plotly_chart(get_waterlines_figure(), use_container_width=True)
+        else:
+            st.markdown("##### 1. Plano de Linhas do Alto (Sheer / Buttocks — Lateral Inteira)")
+            st.plotly_chart(get_sheer_figure(), use_container_width=True)
+            st.markdown("##### 2. Plano de Balizas (Body Plan)")
+            st.plotly_chart(get_body_plan_figure(), use_container_width=True)
+            st.markdown("##### 3. Plano de Linhas d'Água (Half-Breadth Plan)")
+            st.plotly_chart(get_waterlines_figure(), use_container_width=True)
 
-        with col_v2:
-            st.markdown("#### Casco Tridimensional (3D Mesh Suave)")
-            xs_3d = np.linspace(hull.stations_x[0], hull.stations_x[-1], 40)
-            zs_3d = np.linspace(hull.waterlines_z[0], hull.D, 25)
+        st.divider()
+        
+        # ----------------------------------------------------------------------
+        # CASCO 3D (EM CONTAINER COMPLETO ABAIXO DO PLANO 2D)
+        # ----------------------------------------------------------------------
+        st.markdown("#### 🌐 Casco Tridimensional (3D Mesh Suave)")
+        xs_3d = np.linspace(hull.stations_x[0], hull.stations_x[-1], 40)
+        zs_3d = np.linspace(hull.waterlines_z[0], hull.D, 25)
+        
+        x_mesh, z_mesh = np.meshgrid(xs_3d, zs_3d)
+        y_mesh = np.zeros_like(x_mesh)
+        
+        for r in range(x_mesh.shape[0]):
+            for c in range(x_mesh.shape[1]):
+                y_mesh[r, c] = hull.get_y_continuous(x_mesh[r, c], z_mesh[r, c])
             
-            x_mesh, z_mesh = np.meshgrid(xs_3d, zs_3d)
-            y_mesh = np.zeros_like(x_mesh)
-            
-            for r in range(x_mesh.shape[0]):
-                for c in range(x_mesh.shape[1]):
-                    y_mesh[r, c] = hull.get_y_continuous(x_mesh[r, c], z_mesh[r, c])
-                
-            fig_3d = go.Figure()
-            fig_3d.add_trace(go.Surface(x=x_mesh, y=y_mesh, z=z_mesh, colorscale='Viridis', opacity=0.88, showscale=False, name="Boreste (+Y)"))
-            fig_3d.add_trace(go.Surface(x=x_mesh, y=-y_mesh, z=z_mesh, colorscale='Viridis', opacity=0.88, showscale=False, name="Bombordo (-Y)"))
-            
-            # Plano da Água Flutuante
-            xp, yp = np.meshgrid(np.linspace(hull.stations_x[0], hull.stations_x[-1], 8), np.linspace(-hull.B/2, hull.B/2, 8))
-            zp = np.full_like(xp, viz_draft)
-            fig_3d.add_trace(go.Surface(
-                x=xp, y=yp, z=zp,
-                colorscale=[[0, 'rgba(0, 245, 212, 0.40)'], [1, 'rgba(0, 245, 212, 0.40)']],
-                showscale=False, name=f"Plano da Água (T={viz_draft:.2f}m)"
-            ))
-            
-            fig_3d.update_layout(
-                title=f"Casco 3D: {st.session_state.ship_name}",
-                scene=dict(
-                    xaxis_title="X (m) [Longitudinal]",
-                    yaxis_title="Y (m) [Transversal]",
-                    zaxis_title="Z (m) [Vertical]",
-                    aspectmode='data'
-                ),
-                template="plotly_dark", height=480, margin=dict(l=10, r=10, t=40, b=10)
-            )
-            st.plotly_chart(fig_3d, use_container_width=True)
+        fig_3d = go.Figure()
+        fig_3d.add_trace(go.Surface(x=x_mesh, y=y_mesh, z=z_mesh, colorscale='Viridis', opacity=0.88, showscale=False, name="Boreste (+Y)"))
+        fig_3d.add_trace(go.Surface(x=x_mesh, y=-y_mesh, z=z_mesh, colorscale='Viridis', opacity=0.88, showscale=False, name="Bombordo (-Y)"))
+        
+        # Plano da Água Flutuante
+        xp, yp = np.meshgrid(np.linspace(hull.stations_x[0], hull.stations_x[-1], 8), np.linspace(-hull.B/2, hull.B/2, 8))
+        zp = np.full_like(xp, viz_draft)
+        fig_3d.add_trace(go.Surface(
+            x=xp, y=yp, z=zp,
+            colorscale=[[0, 'rgba(0, 245, 212, 0.40)'], [1, 'rgba(0, 245, 212, 0.40)']],
+            showscale=False, name=f"Plano da Água (T={viz_draft:.2f}m)"
+        ))
+        
+        fig_3d.update_layout(
+            title=f"Casco 3D: {st.session_state.ship_name}",
+            scene=dict(
+                xaxis_title="X (m) [Longitudinal]",
+                yaxis_title="Y (m) [Transversal]",
+                zaxis_title="Z (m) [Vertical]",
+                aspectmode='data'
+            ),
+            template="plotly_dark", height=500, margin=dict(l=10, r=10, t=40, b=10)
+        )
+        st.plotly_chart(fig_3d, use_container_width=True)
 
         st.divider()
         st.markdown("### 📐 Exportação CAD Vetorial (AutoCAD & Rhinoceros .DXF)")
