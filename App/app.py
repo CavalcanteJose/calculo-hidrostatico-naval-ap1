@@ -1226,52 +1226,69 @@ else:
             # 2. Linha de Convés (Leitura Direta do Topo da Tabela de Cotas)
             z_deck_dense = np.full_like(xs_dense, D_nom)
 
-            # 3. Perfil de Quilha & Roda de Proa (Extração Direta Ponto a Ponto da Tabela)
-            keel_stem_x = [x0, float(xs[len(xs)//2])]
-            keel_stem_z = [0.0, 0.0]
-            for k in range(1, len(zs)):
+            # 3. Perfil de Quilha & Roda de Proa — extraído ponto a ponto da tabela
+            raw_stem_x = [x0]
+            raw_stem_z = [0.0]
+            prev_x = x0
+            for k in range(len(zs)):
                 row_k = [hull.get_y(j, zs[k]) for j in range(len(xs))]
-                pos_stations = np.where(np.array(row_k) > 0.001)[0]
-                if len(pos_stations) > 0 and pos_stations[-1] < len(xs) - 1:
-                    last_idx = pos_stations[-1]
-                    y_last = row_k[last_idx]
-                    y_next = row_k[last_idx + 1]
-                    x_stem = float(xs[last_idx] + (xs[last_idx + 1] - xs[last_idx]) * (y_last / (y_last - y_next + 1e-9)))
+                pos_idx = np.where(np.array(row_k) > 0.001)[0]
+                if len(pos_idx) > 0 and pos_idx[-1] < len(xs) - 1:
+                    li = pos_idx[-1]
+                    y_a, y_b = row_k[li], row_k[li + 1]
+                    x_stem = float(xs[li] + (xs[li + 1] - xs[li]) * (y_a / (y_a - y_b + 1e-9)))
                 else:
                     x_stem = x_end
-                keel_stem_x.append(x_stem)
-                keel_stem_z.append(float(zs[k]))
 
-            pchip_keel = PchipInterpolator(keel_stem_x, keel_stem_z)
-            z_keel_dense = pchip_keel(xs_dense)
+                if x_stem > prev_x + 0.05:
+                    raw_stem_x.append(x_stem)
+                    raw_stem_z.append(float(zs[k]))
+                    prev_x = x_stem
 
-            # 4. Silhueta Lateral do Casco (Preenchimento Completo 2D)
+            if raw_stem_x[-1] < x_end - 0.1:
+                raw_stem_x.append(x_end)
+                raw_stem_z.append(D_nom)
+
+            keel_curve_x = raw_stem_x[:-1]
+            keel_curve_z = raw_stem_z[:-1]
+            stem_top_x   = raw_stem_x[-2:]
+            stem_top_z   = raw_stem_z[-2:]
+
+            if len(keel_curve_x) >= 2:
+                pchip_keel = PchipInterpolator(keel_curve_x, keel_curve_z)
+                xs_keel_smooth = np.linspace(keel_curve_x[0], keel_curve_x[-1], 150)
+                zs_keel_smooth = pchip_keel(xs_keel_smooth)
+                xs_keel_full = np.concatenate([xs_keel_smooth, np.array(stem_top_x)])
+                zs_keel_full = np.concatenate([zs_keel_smooth, np.array(stem_top_z)])
+            else:
+                xs_keel_full = np.array(raw_stem_x)
+                zs_keel_full = np.array(raw_stem_z)
+
+            # 4. Silhueta Lateral do Casco
+            xs_silhouette = np.concatenate([xs_keel_full, xs_dense[::-1]])
+            zs_silhouette = np.concatenate([zs_keel_full, z_deck_dense[::-1]])
             fig.add_trace(go.Scatter(
-                x=xs_dense, y=z_keel_dense, mode='lines',
-                line=dict(color="rgba(0,0,0,0)"), showlegend=False
-            ))
-            fig.add_trace(go.Scatter(
-                x=xs_dense, y=z_deck_dense, mode='lines',
-                fill='tonexty', fillcolor='rgba(59, 130, 246, 0.10)',
-                name="Silhueta Lateral do Casco (Lateral Inteira)",
+                x=xs_silhouette, y=zs_silhouette, mode='lines',
+                fill='toself', fillcolor='rgba(59, 130, 246, 0.10)',
+                name="Silhueta Lateral do Casco",
                 line=dict(color="#fca311", width=3.0)
             ))
 
-            # 5. Espelho de Popa (ST 00 — Fechamento Total à Ré)
+            # 5. Espelho de Popa (ST 00)
             fig.add_trace(go.Scatter(
                 x=[x0, x0], y=[0.0, D_nom], mode='lines',
                 name="Espelho de Popa (PR)",
                 line=dict(color="#fca311", width=3.0)
             ))
 
-            # 6. Perfil de Quilha e Roda de Proa (Linha Branca Contínua)
+            # 6. Quilha & Roda de Proa
             fig.add_trace(go.Scatter(
-                x=xs_dense, y=z_keel_dense, mode='lines',
+                x=xs_keel_full, y=zs_keel_full, mode='lines',
                 name="Perfil da Quilha & Roda de Proa (Y=0)",
                 line=dict(color="#ffffff", width=3.2)
             ))
 
-            # 7. Linhas do Alto (Extração Ponto a Ponto Direta das Colunas da Planilha)
+            # 7. Linhas do Alto
             cuts_specs = [
                 {"name": "Corte A (Y = 1/6 B)", "y": hull.B * 0.1667, "color": "#f43f5e"},
                 {"name": "Corte B (Y = 1/3 B)", "y": hull.B * 0.3333, "color": "#fb923c"},
@@ -1279,55 +1296,69 @@ else:
             ]
 
             deck_row = [hull.get_y(j, D_nom) for j in range(len(xs))]
-            mid_idx = len(xs) // 2
 
             for cut in cuts_specs:
                 yc = cut["y"]
                 pts_x, pts_z = [], []
-                
-                # 1. Entrada na Popa
-                col_0 = [hull.get_y(0, z) for z in zs]
-                if np.max(col_0) >= yc:
-                    z0 = float(np.interp(yc, col_0, zs))
-                    pts_x.append(x0)
-                    pts_z.append(z0)
-                else:
-                    xa = float(np.interp(yc, deck_row[:mid_idx+1], xs[:mid_idx+1]))
-                    pts_x.append(xa)
-                    pts_z.append(D_nom)
 
-                # 2. Pontos exatos das colunas da tabela de cotas
+                # Lê cada coluna j da tabela e interpola Z onde aquela baliza atinge yc
                 for j in range(len(xs)):
-                    if xs[j] <= pts_x[0]:
+                    col_j = np.array([hull.get_y(j, z) for z in zs])
+                    if np.max(col_j) < yc:
                         continue
-                    col_j = [hull.get_y(j, z) for z in zs]
-                    if np.max(col_j) >= yc:
-                        zj = float(np.interp(yc, col_j, zs))
-                        pts_x.append(float(xs[j]))
-                        pts_z.append(zj)
+                    zj = float(np.interp(yc, col_j, zs))
+                    pts_x.append(float(xs[j]))
+                    pts_z.append(zj)
 
-                # 3. Término no convés na Proa
-                if np.max(deck_row[mid_idx:]) >= yc:
-                    xb = float(np.interp(yc, deck_row[mid_idx:][::-1], xs[mid_idx:][::-1]))
-                    if xb > pts_x[-1]:
-                        pts_x.append(xb)
-                        pts_z.append(D_nom)
+                if len(pts_x) < 2:
+                    continue
 
-                if len(pts_x) >= 2:
-                    pchip_cut = PchipInterpolator(pts_x, pts_z)
-                    xs_cut_dense = np.linspace(pts_x[0], pts_x[-1], 100)
-                    zs_cut_dense = pchip_cut(xs_cut_dense)
-                    
-                    fig.add_trace(go.Scatter(
-                        x=xs_cut_dense, y=zs_cut_dense, mode='lines',
-                        name=f"Linha do Alto {cut['name']}",
-                        line=dict(color=cut["color"], width=2.6)
-                    ))
-                    fig.add_trace(go.Scatter(
-                        x=pts_x, y=pts_z, mode='markers',
-                        marker=dict(size=6, color=cut["color"]),
-                        showlegend=False
-                    ))
+                # Fecha no convés à proa (onde a largura do convés estreita até yc)
+                last_x = pts_x[-1]
+                if pts_z[-1] < D_nom - 0.05:
+                    for j in range(len(xs) - 1, -1, -1):
+                        if deck_row[j] >= yc:
+                            if j + 1 < len(xs):
+                                x_term = float(np.interp(
+                                    yc, [deck_row[j + 1], deck_row[j]], [xs[j + 1], xs[j]]
+                                ))
+                            else:
+                                x_term = float(xs[j])
+                            if x_term > last_x:
+                                pts_x.append(x_term)
+                                pts_z.append(D_nom)
+                            break
+
+                # Fecha no convés à popa (onde a largura do convés estreita até yc)
+                first_x = pts_x[0]
+                if pts_z[0] < D_nom - 0.05:
+                    for j in range(len(xs)):
+                        if deck_row[j] >= yc:
+                            if j > 0:
+                                x_start = float(np.interp(
+                                    yc, [deck_row[j - 1], deck_row[j]], [xs[j - 1], xs[j]]
+                                ))
+                            else:
+                                x_start = float(xs[j])
+                            if x_start < first_x:
+                                pts_x.insert(0, x_start)
+                                pts_z.insert(0, D_nom)
+                            break
+
+                pchip_cut = PchipInterpolator(pts_x, pts_z)
+                xs_cut_dense = np.linspace(pts_x[0], pts_x[-1], 100)
+                zs_cut_dense = pchip_cut(xs_cut_dense)
+
+                fig.add_trace(go.Scatter(
+                    x=xs_cut_dense, y=zs_cut_dense, mode='lines',
+                    name=f"Linha do Alto {cut['name']}",
+                    line=dict(color=cut["color"], width=2.6)
+                ))
+                fig.add_trace(go.Scatter(
+                    x=pts_x, y=pts_z, mode='markers',
+                    marker=dict(size=6, color=cut["color"], symbol='circle'),
+                    showlegend=False
+                ))
 
             # 8. Calado Ativo de Análise (T)
             fig.add_hline(
