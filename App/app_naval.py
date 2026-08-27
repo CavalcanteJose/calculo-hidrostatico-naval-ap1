@@ -1188,113 +1188,128 @@ else:
 
         def get_sheer_figure():
             fig = go.Figure()
-            L_total = float(hull.stations_x[-1] - hull.stations_x[0])
-            x0 = float(hull.stations_x[0])
-            x_end = float(hull.stations_x[-1])
-            xs_eval = np.linspace(x0, x_end, 200)
+            xs = hull.stations_x
+            zs = hull.waterlines_z
+            x0 = float(xs[0])
+            x_end = float(xs[-1])
+            L_total = x_end - x0
             D_nom = float(hull.D)
-            
-            # 1. Malha de Referência (Grid Oficial do Desenho Técnico - Imagens 2 a 5)
-            # Estações verticais (ST 00 a ST 10/20) em vermelho
-            for j, st_x in enumerate(hull.stations_x):
+            xs_dense = np.linspace(x0, x_end, 200)
+
+            # 1. Grid Oficial de Referência (Estações ST em vermelho e Linhas d'Água WL em azul)
+            for j, st_x in enumerate(xs):
                 fig.add_vline(
-                    x=st_x, line_dash="solid", line_color="rgba(239, 68, 68, 0.50)", line_width=1.2,
+                    x=st_x, line_dash="solid", line_color="rgba(239, 68, 68, 0.45)", line_width=1.2,
                     annotation_text=f"ST {j:02d}", annotation_position="top"
                 )
 
-            # Linhas d'Água horizontais em azul
-            for k, wz in enumerate(hull.waterlines_z):
+            for k, wz in enumerate(zs):
                 fig.add_hline(
-                    y=wz, line_dash="solid", line_color="rgba(59, 130, 246, 0.40)", line_width=1.0,
+                    y=wz, line_dash="solid", line_color="rgba(59, 130, 246, 0.35)", line_width=1.0,
                     annotation_text=f"WL {k:02d}" if k > 0 else "LB", annotation_position="left"
                 )
 
             # 2. Linha de Convés / Borda Livre com Tosa (Sheer Line Superior Real)
-            # Alta na popa (ST 00), suave descida na meia-nau (ST 05) e tosa acentuada na proa (ST 10)
-            z_deck = np.zeros_like(xs_eval)
-            x_mid = x0 + 0.50 * L_total
-            for i, x in enumerate(xs_eval):
-                if x <= x_mid:
-                    z_deck[i] = D_nom + 0.08 * D_nom * (((x_mid - x) / (x_mid - x0)) ** 2)
-                else:
-                    z_deck[i] = D_nom + 0.16 * D_nom * (((x - x_mid) / (x_end - x_mid)) ** 2)
-
-            def get_deck_at_x(x_val):
-                if x_val <= x_mid:
-                    return D_nom + 0.08 * D_nom * (((x_mid - x_val) / (x_mid - x0)) ** 2)
-                return D_nom + 0.16 * D_nom * (((x_val - x_mid) / (x_end - x_mid)) ** 2)
-
-            # 3. Perfil da Quilha & Roda de Proa (Y = 0)
-            # Parte do espelho de popa com elevação, desce suavemente para a LB (Z=0), corre plana e sobe na proa até o convés
-            z_keel = np.zeros_like(xs_eval)
-            x_aft_skeg = x0 + 0.20 * L_total
-            x_fore_stem = x0 + 0.58 * L_total
-            z_stem_top = float(z_deck[-1])
+            z_deck_stations = np.array([
+                float(hull.D + 0.08 * hull.D * (((0.5 * L_total - (xj - x0)) / (0.5 * L_total)) ** 2) if (xj - x0) <= 0.5 * L_total else hull.D + 0.16 * hull.D * (((xj - x0 - 0.5 * L_total) / (0.5 * L_total)) ** 2)) for xj in xs
+            ]) if L_total < 25.0 else np.full(len(xs), float(hull.D))
             
-            for i, x in enumerate(xs_eval):
-                if x < x_aft_skeg:
-                    z_keel[i] = 0.20 * D_nom * (((x_aft_skeg - x) / (x_aft_skeg - x0)) ** 2)
-                elif x > x_fore_stem:
-                    f = (x - x_fore_stem) / (x_end - x_fore_stem)
-                    z_keel[i] = z_stem_top * (f ** 2.2)
-                else:
-                    z_keel[i] = 0.0
+            pchip_deck = PchipInterpolator(xs, z_deck_stations)
+            z_deck_dense = pchip_deck(xs_dense)
 
-            # 4. Silhueta Lateral do Casco (Preenchimento Completo 2D)
+            # 3. Perfil de Quilha & Roda de Proa (Linha de Centro Y = 0)
+            z_keel_stations = []
+            for j, xj in enumerate(xs):
+                y_col = [hull.get_y(j, z) for z in zs]
+                pos_idx = np.where(np.array(y_col) > 0.001)[0]
+                if len(pos_idx) > 0 and pos_idx[0] > 0 and (xj - x0) > 0.60 * L_total:
+                    f_proa = (xj - x0 - 0.60 * L_total) / (0.40 * L_total)
+                    zk = float(z_deck_stations[-1] * (f_proa ** 2.2))
+                elif (xj - x0) < 0.20 * L_total and len(pos_idx) > 0 and pos_idx[0] > 0:
+                    f_popa = (0.20 * L_total - (xj - x0)) / (0.20 * L_total)
+                    zk = float(0.20 * D_nom * (f_popa ** 2))
+                else:
+                    zk = 0.0
+                z_keel_stations.append(zk)
+            
+            pchip_keel = PchipInterpolator(xs, np.array(z_keel_stations))
+            z_keel_dense = pchip_keel(xs_dense)
+
+            # 4. Silhueta Lateral do Casco (Preenchimento Completo)
             fig.add_trace(go.Scatter(
-                x=xs_eval, y=z_keel, mode='lines',
+                x=xs_dense, y=z_keel_dense, mode='lines',
                 line=dict(color="rgba(0,0,0,0)"), showlegend=False
             ))
             fig.add_trace(go.Scatter(
-                x=xs_eval, y=z_deck, mode='lines',
+                x=xs_dense, y=z_deck_dense, mode='lines',
                 fill='tonexty', fillcolor='rgba(59, 130, 246, 0.10)',
                 name="Silhueta Lateral do Casco",
                 line=dict(color="#fca311", width=3.0)
             ))
 
-            # 5. Espelho de Popa Inclinado (Raked Transom)
+            # 5. Espelho de Popa Inclinado (PR / ST 00)
             fig.add_trace(go.Scatter(
-                x=[x0, x0], y=[float(z_keel[0]), float(z_deck[0])], mode='lines',
+                x=[x0, x0], y=[float(z_keel_dense[0]), float(z_deck_dense[0])], mode='lines',
                 name="Espelho de Popa (PR)",
                 line=dict(color="#fca311", width=3.0)
             ))
 
             # 6. Perfil de Roda de Proa e Quilha (Linha Branca Contínua)
             fig.add_trace(go.Scatter(
-                x=xs_eval, y=z_keel, mode='lines',
+                x=xs_dense, y=z_keel_dense, mode='lines',
                 name="Perfil da Quilha & Roda de Proa (Y=0)",
                 line=dict(color="#ffffff", width=3.2)
             ))
 
-            # 7. Linhas do Alto (Corte A, Corte B e Corte C — Conforme Imagens 2, 3, 4 e 5)
-            # Nascem no espelho de popa, correm no fundo e sobem em leque na proa até cruzar a linha do convés
-            buttock_specs = [
-                {"name": "Corte A (Y = 1/6 B)", "z_start": 0.38, "z_mid": 0.04, "x_end": 0.98, "color": "#f43f5e", "w": 2.6},
-                {"name": "Corte B (Y = 1/3 B)", "z_start": 0.65, "z_mid": 0.15, "x_end": 0.88, "color": "#fb923c", "w": 2.6},
-                {"name": "Corte C (Y = 1/2 B)", "z_start": 0.90, "z_mid": 0.45, "x_end": 0.75, "color": "#38bdf8", "w": 2.6}
+            # 7. Linhas do Alto por Extração Direta Estação a Estação (PCHIP Monotônico)
+            cuts_specs = [
+                {"name": "Corte A (Y = 1/6 B)", "y": hull.B * 0.1667, "color": "#f43f5e"},
+                {"name": "Corte B (Y = 1/3 B)", "y": hull.B * 0.3333, "color": "#fb923c"},
+                {"name": "Corte C (Y = 1/2 B)", "y": hull.B * 0.4900, "color": "#38bdf8"}
             ]
 
-            for b in buttock_specs:
-                x_term = x0 + b["x_end"] * L_total
-                xs_b = np.linspace(x0, x_term, 120)
-                z_b = np.zeros_like(xs_b)
-                z_mid_val = b["z_mid"] * D_nom
-                z_start_val = b["z_start"] * D_nom
-                z_deck_end = get_deck_at_x(x_term)
+            for cut in cuts_specs:
+                yc = cut["y"]
+                pts_x, pts_z = [], []
                 
-                for i, x in enumerate(xs_b):
-                    if x <= x_mid:
-                        f = (x - x0) / (x_mid - x0)
-                        z_b[i] = z_mid_val + (z_start_val - z_mid_val) * ((1.0 - f) ** 1.8)
-                    else:
-                        f = (x - x_mid) / (x_term - x_mid)
-                        z_b[i] = z_mid_val + (z_deck_end - z_mid_val) * (f ** 1.9)
-                        
-                fig.add_trace(go.Scatter(
-                    x=xs_b, y=z_b, mode='lines',
-                    name=f"Linha do Alto {b['name']}",
-                    line=dict(color=b["color"], width=b["w"])
-                ))
+                # Início no espelho de popa (ST 00)
+                y_transom = [hull.get_y(0, z) for z in zs]
+                if np.max(y_transom) >= yc:
+                    z_start = float(np.interp(yc, y_transom, zs))
+                    pts_x.append(x0)
+                    pts_z.append(z_start)
+
+                # Pontos intermediários em cada estação transversal
+                for j, xj in enumerate(xs):
+                    y_col = [hull.get_y(j, z) for z in zs]
+                    if np.max(y_col) >= yc:
+                        if y_col[0] >= yc:
+                            zj = 0.0
+                        else:
+                            zj = float(np.interp(yc, y_col, zs))
+                        if len(pts_x) == 0 or xj > pts_x[-1]:
+                            pts_x.append(float(xj))
+                            pts_z.append(zj)
+
+                # Ponto de término no convés na proa
+                deck_widths = [hull.get_y(j, hull.D) for j in range(len(xs))]
+                if np.max(deck_widths) >= yc:
+                    x_term = float(np.interp(yc, deck_widths[::-1], xs[::-1]))
+                    z_term = float(pchip_deck(x_term))
+                    if x_term > pts_x[-1]:
+                        pts_x.append(x_term)
+                        pts_z.append(z_term)
+
+                if len(pts_x) >= 3:
+                    pchip_cut = PchipInterpolator(pts_x, pts_z)
+                    xs_cut_dense = np.linspace(pts_x[0], pts_x[-1], 100)
+                    zs_cut_dense = pchip_cut(xs_cut_dense)
+                    
+                    fig.add_trace(go.Scatter(
+                        x=xs_cut_dense, y=zs_cut_dense, mode='lines',
+                        name=f"Linha do Alto {cut['name']}",
+                        line=dict(color=cut["color"], width=2.6)
+                    ))
 
             # 8. Calado Ativo de Análise (T)
             fig.add_hline(
@@ -1303,10 +1318,10 @@ else:
             )
 
             fig.update_layout(
-                title="Plano de Linhas do Alto (Sheer / Buttock Plan — Vista Lateral Completa do Casco)",
+                title="Plano de Linhas do Alto (Sheer / Buttock Plan — Extração Exata Baliza por Baliza)",
                 xaxis_title="Comprimento Longitudinal X (m) [PR (Popa) → SM (Meia-Nau) → PV (Proa)]",
                 yaxis_title="Altura Vertical Z (m) a partir da Linha de Base (LB)",
-                yaxis=dict(range=[-0.05, float(z_deck[-1]) + 0.15]),
+                yaxis=dict(range=[-0.05, float(z_deck_dense[-1]) + 0.15]),
                 template="plotly_dark", height=520, margin=dict(l=25, r=25, t=45, b=25),
                 legend=dict(orientation="h", yanchor="bottom", y=-0.42, xanchor="center", x=0.5)
             )
