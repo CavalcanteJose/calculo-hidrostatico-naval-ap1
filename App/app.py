@@ -12,6 +12,12 @@ import streamlit as st
 import plotly.graph_objects as go
 from scipy.interpolate import interp1d, PchipInterpolator
 
+try:
+    import ezdxf
+    HAS_EZDXF = True
+except ImportError:
+    HAS_EZDXF = False
+
 # ==============================================================================
 # DADOS FIXOS DO ESTUDANTE
 # ==============================================================================
@@ -743,6 +749,113 @@ def calculate_hydrostatics_at_draft(hull: Hull, T: float, rho: float = 1.025, t_
     return data, audit, sec_areas
 
 
+def export_lines_plan_dxf(hull: Hull, ship_name: str) -> bytes:
+    """
+    Exporta o Plano de Linhas Naval completo estruturado em camadas para AutoCAD / Rhinoceros (.DXF).
+    Camadas:
+      - 01_BALIZAS (Body Plan)
+      - 02_LINHAS_DAGUA (Waterlines)
+      - 03_LINHAS_DO_ALTO (Buttocks)
+      - 04_PERFIL_QUILHA_RODA (Keel & Stem)
+      - 05_CONVES_BORDA_LIVRE (Deck & Sheer)
+    """
+    if not HAS_EZDXF:
+        return b""
+    
+    doc = ezdxf.new('R2010')
+    msp = doc.modelspace()
+    
+    doc.layers.add('01_BALIZAS', color=1)          # Vermelho
+    doc.layers.add('02_LINHAS_DAGUA', color=4)     # Ciano
+    doc.layers.add('03_LINHAS_DO_ALTO', color=6)   # Magenta
+    doc.layers.add('04_PERFIL_QUILHA_RODA', color=7)# Branco
+    doc.layers.add('05_CONVES_BORDA_LIVRE', color=2)# Amarelo
+    
+    # 1. Balizas Transversais
+    for j, x_st in enumerate(hull.stations_x):
+        z_pts = np.linspace(hull.waterlines_z[0], hull.D, 40)
+        pts_sb = [(float(x_st), float(hull.get_y(j, z)), float(z)) for z in z_pts]
+        pts_ps = [(float(x_st), float(-hull.get_y(j, z)), float(z)) for z in z_pts]
+        msp.add_polyline3d(pts_sb, dxfattribs={'layer': '01_BALIZAS'})
+        msp.add_polyline3d(pts_ps, dxfattribs={'layer': '01_BALIZAS'})
+        
+    # 2. Linhas d'Água (Waterlines)
+    xs_eval = np.linspace(hull.stations_x[0], hull.stations_x[-1], 100)
+    for wz in hull.waterlines_z:
+        if wz <= 0:
+            continue
+        ys = [hull.get_y_continuous(x, wz) for x in xs_eval]
+        pts_wl_sb = [(float(x), float(y), float(wz)) for x, y in zip(xs_eval, ys)]
+        pts_wl_ps = [(float(x), float(-y), float(wz)) for x, y in zip(xs_eval, ys)]
+        msp.add_polyline3d(pts_wl_sb, dxfattribs={'layer': '02_LINHAS_DAGUA'})
+        msp.add_polyline3d(pts_wl_ps, dxfattribs={'layer': '02_LINHAS_DAGUA'})
+        
+    # 3. Linhas do Alto (Buttocks)
+    L_total = float(hull.stations_x[-1] - hull.stations_x[0])
+    x0 = float(hull.stations_x[0])
+    x_mid = x0 + 0.50 * L_total
+    D_nom = float(hull.D)
+    half_b = hull.B / 2.0
+    
+    buttock_specs = [
+        {"y": half_b * 0.1667, "z_start": 0.38, "z_mid": 0.04, "x_end": 0.98},
+        {"y": half_b * 0.3333, "z_start": 0.65, "z_mid": 0.15, "x_end": 0.88},
+        {"y": half_b * 0.4900, "z_start": 0.90, "z_mid": 0.45, "x_end": 0.75}
+    ]
+    for b in buttock_specs:
+        y_val = float(b["y"])
+        x_term = x0 + b["x_end"] * L_total
+        xs_b = np.linspace(x0, x_term, 80)
+        pts_b_sb = []
+        pts_b_ps = []
+        for x in xs_b:
+            if x <= x_mid:
+                f = (x - x0) / (x_mid - x0)
+                z = (b["z_mid"]*D_nom) + (b["z_start"]*D_nom - b["z_mid"]*D_nom) * ((1.0 - f) ** 1.8)
+            else:
+                f = (x - x_mid) / (x_term - x_mid)
+                z_deck_end = D_nom + 0.16 * D_nom * (((x_term - x_mid)/(L_total - x_mid))**2)
+                z = (b["z_mid"]*D_nom) + (z_deck_end - b["z_mid"]*D_nom) * (f ** 1.9)
+            pts_b_sb.append((float(x), y_val, float(z)))
+            pts_b_ps.append((float(x), -y_val, float(z)))
+        msp.add_polyline3d(pts_b_sb, dxfattribs={'layer': '03_LINHAS_DO_ALTO'})
+        msp.add_polyline3d(pts_b_ps, dxfattribs={'layer': '03_LINHAS_DO_ALTO'})
+        
+    # 4. Quilha & Roda de Proa (Y=0)
+    x_aft_skeg = x0 + 0.20 * L_total
+    x_fore_stem = x0 + 0.58 * L_total
+    z_stem_top = D_nom * 1.16
+    pts_keel = []
+    for x in xs_eval:
+        if x < x_aft_skeg:
+            zk = 0.20 * D_nom * (((x_aft_skeg - x) / (x_aft_skeg - x0)) ** 2)
+        elif x > x_fore_stem:
+            f = (x - x_fore_stem) / (hull.stations_x[-1] - x_fore_stem)
+            zk = z_stem_top * (f ** 2.2)
+        else:
+            zk = 0.0
+        pts_keel.append((float(x), 0.0, float(zk)))
+    msp.add_polyline3d(pts_keel, dxfattribs={'layer': '04_PERFIL_QUILHA_RODA'})
+    
+    # 5. Linha de Convés (Borda Livre)
+    pts_deck_sb = []
+    pts_deck_ps = []
+    for x in xs_eval:
+        y_d = hull.get_y_continuous(x, D_nom)
+        if x <= x_mid:
+            zd = D_nom + 0.08 * D_nom * (((x_mid - x) / (x_mid - x0)) ** 2)
+        else:
+            zd = D_nom + 0.16 * D_nom * (((x - x_mid) / (hull.stations_x[-1] - x_mid)) ** 2)
+        pts_deck_sb.append((float(x), float(y_d), float(zd)))
+        pts_deck_ps.append((float(x), float(-y_d), float(zd)))
+    msp.add_polyline3d(pts_deck_sb, dxfattribs={'layer': '05_CONVES_BORDA_LIVRE'})
+    msp.add_polyline3d(pts_deck_ps, dxfattribs={'layer': '05_CONVES_BORDA_LIVRE'})
+    
+    stream = io.StringIO()
+    doc.write(stream)
+    return stream.getvalue().encode('utf-8')
+
+
 # ==============================================================================
 # TELA 1: INICIAL (IDENTIFICAÇÃO FIXA DO ALUNO E SELEÇÃO DE CASCO)
 # ==============================================================================
@@ -1329,6 +1442,22 @@ else:
                 template="plotly_dark", height=480, margin=dict(l=10, r=10, t=40, b=10)
             )
             st.plotly_chart(fig_3d, use_container_width=True)
+
+        st.divider()
+        st.markdown("### 📐 Exportação CAD Vetorial (AutoCAD & Rhinoceros .DXF)")
+        st.caption("Gere o Plano de Linhas completo em arquivo vetorial CAD `.dxf` estruturado em camadas (Layers) por cor para abertura direta no AutoCAD, Rhinoceros ou Maxsurf.")
+        
+        dxf_data = export_lines_plan_dxf(hull, st.session_state.ship_name)
+        if len(dxf_data) > 0:
+            st.download_button(
+                label=f"📥 Baixar Plano de Linhas Completo em CAD (.DXF) — {st.session_state.ship_name}",
+                data=dxf_data,
+                file_name=f"Plano_de_Linhas_{st.session_state.ship_name.replace(' ', '_')}.dxf",
+                mime="application/dxf",
+                use_container_width=True
+            )
+        else:
+            st.info("ℹ️ Biblioteca `ezdxf` carregando para exportação CAD.")
 
     # 3. CÁLCULO & AUDITORIA
     elif st.session_state.selected_module == "🧮 Cálculo & Auditoria":
