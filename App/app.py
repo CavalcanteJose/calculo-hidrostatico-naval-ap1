@@ -1207,7 +1207,6 @@ else:
             zs = hull.waterlines_z
             x0 = float(xs[0])
             x_end = float(xs[-1])
-            L_total = x_end - x0
             D_nom = float(hull.D)
             xs_dense = np.linspace(x0, x_end, 200)
 
@@ -1224,18 +1223,27 @@ else:
                     annotation_text=f"WL {k:02d}" if k > 0 else "LB", annotation_position="left"
                 )
 
-            # 2. Linha de Convés (Teto Reto / Sheer Line no Pontal D de Popa a Proa)
+            # 2. Linha de Convés (Leitura Direta do Topo da Tabela de Cotas)
             z_deck_dense = np.full_like(xs_dense, D_nom)
 
-            # 3. Perfil da Quilha & Roda de Proa (Y = 0 — Contorno Externo Máximo do Casco)
-            z_keel_dense = np.zeros_like(xs_dense)
-            x_stem_start = x0 + 0.52 * L_total
-            for i, x in enumerate(xs_dense):
-                if x <= x_stem_start:
-                    z_keel_dense[i] = 0.0
+            # 3. Perfil de Quilha & Roda de Proa (Extração Direta Ponto a Ponto da Tabela)
+            keel_stem_x = [x0, float(xs[len(xs)//2])]
+            keel_stem_z = [0.0, 0.0]
+            for k in range(1, len(zs)):
+                row_k = [hull.get_y(j, zs[k]) for j in range(len(xs))]
+                pos_stations = np.where(np.array(row_k) > 0.001)[0]
+                if len(pos_stations) > 0 and pos_stations[-1] < len(xs) - 1:
+                    last_idx = pos_stations[-1]
+                    y_last = row_k[last_idx]
+                    y_next = row_k[last_idx + 1]
+                    x_stem = float(xs[last_idx] + (xs[last_idx + 1] - xs[last_idx]) * (y_last / (y_last - y_next + 1e-9)))
                 else:
-                    f = (x - x_stem_start) / (x_end - x_stem_start)
-                    z_keel_dense[i] = D_nom * (f ** 2.2)
+                    x_stem = x_end
+                keel_stem_x.append(x_stem)
+                keel_stem_z.append(float(zs[k]))
+
+            pchip_keel = PchipInterpolator(keel_stem_x, keel_stem_z)
+            z_keel_dense = pchip_keel(xs_dense)
 
             # 4. Silhueta Lateral do Casco (Preenchimento Completo 2D)
             fig.add_trace(go.Scatter(
@@ -1256,57 +1264,70 @@ else:
                 line=dict(color="#fca311", width=3.0)
             ))
 
-            # 6. Perfil de Quilha e Roda de Proa (Linha Branca Contínua por Fora de Todos os Cortes)
+            # 6. Perfil de Quilha e Roda de Proa (Linha Branca Contínua)
             fig.add_trace(go.Scatter(
                 x=xs_dense, y=z_keel_dense, mode='lines',
                 name="Perfil da Quilha & Roda de Proa (Y=0)",
                 line=dict(color="#ffffff", width=3.2)
             ))
 
-            # 7. Linhas do Alto em Fundo Nivelado e Cascata de Proa (Conforme Desenho Técnico Oficial)
-            buttock_configs = [
-                {
-                    "name": "Corte A (Y = 1/6 B)",
-                    "z_bottom_frac": 0.04,
-                    "x_trans_frac": 0.50, "x_term_frac": 0.96,
-                    "color": "#f43f5e", "w": 2.6
-                },
-                {
-                    "name": "Corte B (Y = 1/3 B)",
-                    "z_bottom_frac": 0.12,
-                    "x_trans_frac": 0.45, "x_term_frac": 0.88,
-                    "color": "#fb923c", "w": 2.6
-                },
-                {
-                    "name": "Corte C (Y = 1/2 B)",
-                    "z_bottom_frac": 0.28,
-                    "x_trans_frac": 0.40, "x_term_frac": 0.77,
-                    "color": "#38bdf8", "w": 2.6
-                }
+            # 7. Linhas do Alto (Extração Ponto a Ponto Direta das Colunas da Planilha)
+            cuts_specs = [
+                {"name": "Corte A (Y = 1/6 B)", "y": hull.B * 0.1667, "color": "#f43f5e"},
+                {"name": "Corte B (Y = 1/3 B)", "y": hull.B * 0.3333, "color": "#fb923c"},
+                {"name": "Corte C (Y = 1/2 B)", "y": hull.B * 0.4900, "color": "#38bdf8"}
             ]
 
-            for cfg in buttock_configs:
-                x_term = x0 + cfg["x_term_frac"] * L_total
-                x_trans = x0 + cfg["x_trans_frac"] * L_total
-                z_bot = cfg["z_bottom_frac"] * D_nom
+            deck_row = [hull.get_y(j, D_nom) for j in range(len(xs))]
+            mid_idx = len(xs) // 2
+
+            for cut in cuts_specs:
+                yc = cut["y"]
+                pts_x, pts_z = [], []
                 
-                xs_cut = np.linspace(x0, x_term, 140)
-                zs_cut = np.zeros_like(xs_cut)
-                
-                for i, x in enumerate(xs_cut):
-                    if x <= x_trans:
-                        # Corre nivelado/plano pelo fundo da popa até a meia-nau
-                        zs_cut[i] = z_bot
-                    else:
-                        # Sobe suavemente em arco de concordância até o convés
-                        f = (x - x_trans) / (x_term - x_trans)
-                        zs_cut[i] = z_bot + (D_nom - z_bot) * (f ** 2.2)
-                        
-                fig.add_trace(go.Scatter(
-                    x=xs_cut, y=zs_cut, mode='lines',
-                    name=f"Linha do Alto {cfg['name']}",
-                    line=dict(color=cfg["color"], width=cfg["w"])
-                ))
+                # 1. Entrada na Popa
+                col_0 = [hull.get_y(0, z) for z in zs]
+                if np.max(col_0) >= yc:
+                    z0 = float(np.interp(yc, col_0, zs))
+                    pts_x.append(x0)
+                    pts_z.append(z0)
+                else:
+                    xa = float(np.interp(yc, deck_row[:mid_idx+1], xs[:mid_idx+1]))
+                    pts_x.append(xa)
+                    pts_z.append(D_nom)
+
+                # 2. Pontos exatos das colunas da tabela de cotas
+                for j in range(len(xs)):
+                    if xs[j] <= pts_x[0]:
+                        continue
+                    col_j = [hull.get_y(j, z) for z in zs]
+                    if np.max(col_j) >= yc:
+                        zj = float(np.interp(yc, col_j, zs))
+                        pts_x.append(float(xs[j]))
+                        pts_z.append(zj)
+
+                # 3. Término no convés na Proa
+                if np.max(deck_row[mid_idx:]) >= yc:
+                    xb = float(np.interp(yc, deck_row[mid_idx:][::-1], xs[mid_idx:][::-1]))
+                    if xb > pts_x[-1]:
+                        pts_x.append(xb)
+                        pts_z.append(D_nom)
+
+                if len(pts_x) >= 2:
+                    pchip_cut = PchipInterpolator(pts_x, pts_z)
+                    xs_cut_dense = np.linspace(pts_x[0], pts_x[-1], 100)
+                    zs_cut_dense = pchip_cut(xs_cut_dense)
+                    
+                    fig.add_trace(go.Scatter(
+                        x=xs_cut_dense, y=zs_cut_dense, mode='lines',
+                        name=f"Linha do Alto {cut['name']}",
+                        line=dict(color=cut["color"], width=2.6)
+                    ))
+                    fig.add_trace(go.Scatter(
+                        x=pts_x, y=pts_z, mode='markers',
+                        marker=dict(size=6, color=cut["color"]),
+                        showlegend=False
+                    ))
 
             # 8. Calado Ativo de Análise (T)
             fig.add_hline(
@@ -1315,7 +1336,7 @@ else:
             )
 
             fig.update_layout(
-                title="Plano de Linhas do Alto (Sheer / Buttock Plan — Perfil Lateral Completo Popa-Proa)",
+                title="Plano de Linhas do Alto (Sheer / Buttock Plan — Extração Direta Ponto a Ponto da Tabela)",
                 xaxis_title="Comprimento Longitudinal X (m) [PR (Popa) → SM (Meia-Nau) → PV (Proa)]",
                 yaxis_title="Altura Vertical Z (m) a partir da Linha de Base (LB)",
                 yaxis=dict(range=[-0.05, D_nom + 0.15]),
