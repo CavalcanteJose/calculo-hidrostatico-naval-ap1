@@ -1005,88 +1005,66 @@ else:
 
         def get_waterlines_figure():
             fig = go.Figure()
-            xs_eval = np.linspace(hull.stations_x[0], hull.stations_x[-1], 140)
-            mid_x = hull.stations_x[5]
+            xs_eval = np.linspace(hull.stations_x[0], hull.stations_x[-1], 160)
             
-            # 1. Malha de Referência (Grid): Balizas verticais vermelhas (ST 00 a ST 10)
+            # 1. Malha de Referência (Grid): Balizas verticais (ST 00 a ST 10/20)
             for j, st_x in enumerate(hull.stations_x):
                 fig.add_vline(
-                    x=st_x, line_dash="solid", line_color="rgba(239, 68, 68, 0.50)", line_width=1.2,
+                    x=st_x, line_dash="solid", line_color="rgba(239, 68, 68, 0.45)", line_width=1.2,
                     annotation_text=f"ST {j:02d}", annotation_position="top"
                 )
 
-            # Linha de Centro (℄ LC - Linha central horizontal Y=0)
-            fig.add_hline(y=0, line_dash="dash", line_color="#ef4444", line_width=1.8, annotation_text="℄ Linha de Centro (LC)", annotation_position="left")
+            # Linha de Centro (℄ LC - Eixo de Simetria Y=0)
+            fig.add_hline(y=0, line_dash="dash", line_color="#ef4444", line_width=2.0, annotation_text="℄ Linha de Centro (LC)", annotation_position="left")
 
-            # 2. Traçar Linhas d'Água Completas (Bombordo e Boreste — Embarcação Inteira)
-            # Conforme desenho verde do usuário: largura quase paralela na meia-nau e afilamento suave na proa
-            wl_fractions = [
-                {"k": 10, "wz": 1.80, "b_ratio": 1.00, "t_ratio": 0.92, "color": "#38bdf8", "w": 2.6},
-                {"k": 8,  "wz": 1.44, "b_ratio": 0.95, "t_ratio": 0.86, "color": "#60a5fa", "w": 2.2},
-                {"k": 6,  "wz": 1.08, "b_ratio": 0.88, "t_ratio": 0.78, "color": "#818cf8", "w": 2.0},
-                {"k": 4,  "wz": 0.72, "b_ratio": 0.75, "t_ratio": 0.62, "color": "#a78bfa", "w": 1.8},
-                {"k": 2,  "wz": 0.36, "b_ratio": 0.55, "t_ratio": 0.40, "color": "#c084fc", "w": 1.6},
-                {"k": 1,  "wz": 0.18, "b_ratio": 0.35, "t_ratio": 0.18, "color": "#e879f9", "w": 1.5}
+            # Cortes Longitudinais de Referência (Cortes I, II e III)
+            cuts_y_ref = [hull.B * 0.1667, hull.B * 0.3333, hull.B * 0.490]
+            for cy, cname in zip(cuts_y_ref, ["Corte I", "Corte II", "Corte III"]):
+                fig.add_hline(y=cy, line_dash="dot", line_color="rgba(148, 163, 184, 0.30)", line_width=1.0)
+                fig.add_hline(y=-cy, line_dash="dot", line_color="rgba(148, 163, 184, 0.30)", line_width=1.0)
+
+            # 2. Traçar Linhas d'Água (WL 00 a WL 10) — Seccionamento Horizontal Real da Superfície 3D
+            # Conforme método Paulo Abreu: lâminas horizontais cortando a casca 3D em toda a extensão
+            colors_wl = [
+                "#e879f9", "#c084fc", "#a855f7", "#818cf8", "#6366f1",
+                "#3b82f6", "#0ea5e9", "#06b6d4", "#14b8a6", "#10b981", "#38bdf8"
             ]
 
-            for wl in wl_fractions:
-                y_max = (hull.B / 2.0) * wl["b_ratio"]
-                y_transom = (hull.B / 2.0) * wl["t_ratio"]
+            for k, wz in enumerate(hull.waterlines_z):
+                if wz <= 0.0:
+                    continue
+                # Meias-bocas extraídas diretamente da superfície contínua do casco
+                ys_half = np.array([hull.get_y_continuous(xv, wz) for xv in xs_eval])
                 
-                ys_half = []
-                for xv in xs_eval:
-                    if xv <= mid_x:
-                        # Popa à meia-nau: quase paralelo com suave expansão até o costado máximo
-                        frac_aft = xv / mid_x
-                        y_val = y_transom + (y_max - y_transom) * (frac_aft ** 1.2)
-                    else:
-                        # Meia-nau à proa: afilamento suave até o bico da proa em ST 10 (X = 9.112m)
-                        frac_fore = (xv - mid_x) / (hull.stations_x[-1] - mid_x)
-                        y_val = y_max * (1.0 - (frac_fore ** 1.85))
-                    ys_half.append(float(max(0.0, y_val)))
-                
-                ys_half = np.array(ys_half)
-                
-                # Plota lado Boreste (+Y) e Bombordo (-Y) fechando a curva completa da embarcação
+                # Plota a linha d'água simétrica completa (Boreste +Y e Bombordo -Y)
                 x_full = np.concatenate([xs_eval, xs_eval[::-1]])
                 y_full = np.concatenate([ys_half, -ys_half[::-1]])
                 
+                c_color = colors_wl[k % len(colors_wl)]
                 fig.add_trace(go.Scatter(
                     x=x_full, y=y_full, mode='lines',
-                    name=f"WL {wl['k']:02d} (z={wl['wz']:.2f}m)",
-                    line=dict(color=wl["color"], width=wl["w"])
+                    name=f"WL {k:02d} (z={wz:.2f}m)",
+                    line=dict(color=c_color, width=2.0)
                 ))
 
-            # Calado Ativo de Análise
-            y_act_max = (hull.B / 2.0) * min(1.0, (viz_draft / hull.D) ** 0.55)
-            y_act_transom = y_act_max * 0.85
-            ys_act = []
-            for xv in xs_eval:
-                if xv <= mid_x:
-                    frac_aft = xv / mid_x
-                    y_val = y_act_transom + (y_act_max - y_act_transom) * (frac_aft ** 1.2)
-                else:
-                    frac_fore = (xv - mid_x) / (hull.stations_x[-1] - mid_x)
-                    y_val = y_act_max * (1.0 - (frac_fore ** 1.85))
-                ys_act.append(float(max(0.0, y_val)))
-            ys_act = np.array(ys_act)
-            
+            # 3. Linha d'Água Ativa no Calado Selecionado (T) com Preenchimento do Plano de Flutuação
+            ys_act_half = np.array([hull.get_y_continuous(xv, viz_draft) for xv in xs_eval])
             x_act_full = np.concatenate([xs_eval, xs_eval[::-1]])
-            y_act_full = np.concatenate([ys_act, -ys_act[::-1]])
+            y_act_full = np.concatenate([ys_act_half, -ys_act_half[::-1]])
             
             fig.add_trace(go.Scatter(
                 x=x_act_full, y=y_act_full, mode='lines',
-                fill='toself', fillcolor='rgba(0, 245, 212, 0.15)',
-                name=f"★ Plano de Flutuação Calado T={viz_draft:.2f}m",
+                fill='toself', fillcolor='rgba(0, 245, 212, 0.20)',
+                name=f"★ Plano de Flutuação Ativo T={viz_draft:.2f}m",
                 line=dict(color="#00f5d4", width=3.2)
             ))
 
-            # Painel de Popa (Linha reta vertical em ST 00)
-            y_deck_t = (hull.B / 2.0) * 0.92
+            # 4. Fechamento do Espelho de Popa (ST 00)
+            y_t_deck = hull.get_y_continuous(hull.stations_x[0], hull.D)
             fig.add_trace(go.Scatter(
-                x=[0.0, 0.0], y=[-y_deck_t, y_deck_t], mode='lines',
-                name="Espelho de Popa (ST 00)",
-                line=dict(color="#fca311", width=2.8)
+                x=[hull.stations_x[0], hull.stations_x[0]], y=[-y_t_deck, y_t_deck], mode='lines',
+                name="Espelho de Popa (PR)",
+                line=dict(color="#fca311", width=3.0)
             ))
 
             fig.update_layout(
@@ -1100,42 +1078,39 @@ else:
 
         def get_sheer_figure():
             fig = go.Figure()
-            xs_eval = np.linspace(hull.stations_x[0], hull.stations_x[-1], 150)
-            mid_x = hull.stations_x[5]
+            xs_eval = np.linspace(hull.stations_x[0], hull.stations_x[-1], 160)
+            z_search = np.linspace(hull.waterlines_z[0], hull.D, 80)
             
-            # 1. Malha de Referência (Grid): Balizas verticais (ST 00 a ST 10)
+            # 1. Malha de Referência (Grid): Balizas verticais e Linhas d'Água horizontais
             for j, st_x in enumerate(hull.stations_x):
                 fig.add_vline(
-                    x=st_x, line_dash="solid", line_color="rgba(239, 68, 68, 0.50)", line_width=1.2,
+                    x=st_x, line_dash="solid", line_color="rgba(239, 68, 68, 0.45)", line_width=1.2,
                     annotation_text=f"ST {j:02d}", annotation_position="top"
                 )
 
-            # Linhas d'Água horizontais de referência (LB, WL 01 a WL 10)
             for k, wz in enumerate(hull.waterlines_z):
                 fig.add_hline(
                     y=wz, line_dash="solid", line_color="rgba(59, 130, 246, 0.35)", line_width=1.0,
                     annotation_text=f"WL {k:02d}" if k > 0 else "LB", annotation_position="left"
                 )
 
-            # 2. Contorno do Casco Inteiro (Perfil Lateral Completo)
-            # Linha de Quilha & Roda de Proa (Inferior)
+            # 2. Contorno do Perfil da Quilha & Roda de Proa (Linha de Centro Y = 0)
+            # Encontra o ponto inferior real da casca ao longo de todo o comprimento
             z_keel = []
             for xv in xs_eval:
-                frac = xv / hull.stations_x[-1]
-                if frac <= 0.45:
-                    z_val = 0.0
+                y_col = np.array([hull.get_y_continuous(xv, zi) for zi in z_search])
+                pos_idx = np.where(y_col > 0.005)[0]
+                if len(pos_idx) > 0 and pos_idx[0] > 0:
+                    z_bottom = z_search[pos_idx[0]]
                 else:
-                    z_val = hull.D * (((frac - 0.45) / 0.55) ** 1.85)
-                z_keel.append(float(z_val))
+                    z_bottom = 0.0
+                z_keel.append(float(z_bottom))
             z_keel = np.array(z_keel)
 
-            # Linha de Convés / Borda Livre (Superior)
-            z_deck = np.array([float(hull.D - 0.04 + 0.04 * ((xv / hull.stations_x[-1]) ** 1.8)) for xv in xs_eval])
+            # Linha de Convés / Borda Livre (Sheer Line Superior Real)
+            z_deck = np.full_like(xs_eval, hull.D)
 
-            # Preenchimento Sombreado do Corpo Lateral do Casco (Lateral Inteira da Embarcação)
-            x_hull_body = np.concatenate([[0.0], xs_eval, [hull.stations_x[-1]], [0.0]])
-            z_hull_body = np.concatenate([[0.0], z_deck, [hull.D], [0.0]])
-            
+            # 3. Silhueta Lateral do Casco (Preenchimento Completo 2D)
             fig.add_trace(go.Scatter(
                 x=xs_eval, y=z_keel, mode='lines',
                 line=dict(color="rgba(0,0,0,0)"), showlegend=False
@@ -1143,51 +1118,52 @@ else:
             fig.add_trace(go.Scatter(
                 x=xs_eval, y=z_deck, mode='lines',
                 fill='tonexty', fillcolor='rgba(59, 130, 246, 0.12)',
-                name="Corpo Lateral do Navio (Perfil Completo)",
+                name="Silhueta Lateral do Casco (Perfil Completo)",
                 line=dict(color="#fca311", width=3.0)
             ))
 
-            # 3. Painel de Popa (PR / ST 00)
+            # 4. Painel de Popa (PR / ST 00)
             fig.add_trace(go.Scatter(
-                x=[0.0, 0.0], y=[0.0, float(z_deck[0])], mode='lines',
-                name="Painel de Popa (ST 00)",
+                x=[hull.stations_x[0], hull.stations_x[0]], y=[float(z_keel[0]), float(z_deck[0])], mode='lines',
+                name="Painel de Popa (PR)",
                 line=dict(color="#fca311", width=3.0)
             ))
 
-            # 4. Perfil da Quilha & Roda de Proa (Linha de Centro Y = 0)
+            # 5. Perfil da Quilha & Roda de Proa (Y=0)
             fig.add_trace(go.Scatter(
                 x=xs_eval, y=z_keel, mode='lines',
                 name="Perfil da Quilha & Roda de Proa (Y=0)",
                 line=dict(color="#ffffff", width=3.2)
             ))
 
-            # 5. Linhas do Alto (Cortes I, II, III / Conforme desenho verde do usuário)
-            buttock_curves = [
-                {"name": "Corte I (Y = 340 mm)", "z_start": 0.15, "color": "#c084fc", "w": 2.4, "power": 1.90},
-                {"name": "Corte II (Y = 680 mm)", "z_start": 0.50, "color": "#f43f5e", "w": 2.4, "power": 1.65},
-                {"name": "Corte III (Y = 1000 mm)", "z_start": 1.05, "color": "#38bdf8", "w": 2.4, "power": 1.40}
+            # 6. Linhas do Alto (Cortes Longitudinais I, II e III) — Seccionamento Vertical da Superfície 3D
+            # Conforme método do Paulo Abreu / Rhino: secciona a casca 3D no afastamento Y_c
+            cuts_specs = [
+                {"name": "Corte I (Y = 1/6 B)", "y": hull.B * 0.1667, "color": "#c084fc", "w": 2.5},
+                {"name": "Corte II (Y = 1/3 B)", "y": hull.B * 0.3333, "color": "#f43f5e", "w": 2.5},
+                {"name": "Corte III (Y = 1/2 B)", "y": hull.B * 0.4900, "color": "#38bdf8", "w": 2.5}
             ]
 
-            for b in buttock_curves:
-                z_b = []
-                for xv in xs_eval:
-                    frac = xv / hull.stations_x[-1]
-                    if frac <= 0.45:
-                        # Popa até a meia-nau: quase horizontal/nivelada
-                        z_val = b["z_start"]
-                    else:
-                        # Meia-nau até a proa: curva suave contínua em leque até o bico de proa (Z = D)
-                        f_proa = (frac - 0.45) / 0.55
-                        z_val = b["z_start"] + (hull.D - b["z_start"]) * (f_proa ** b["power"])
-                    z_b.append(float(z_val))
+            for cut in cuts_specs:
+                y_c = cut["y"]
+                pts_x, pts_z = [], []
                 
-                fig.add_trace(go.Scatter(
-                    x=xs_eval, y=z_b, mode='lines',
-                    name=f"Linha do Alto {b['name']}",
-                    line=dict(color=b["color"], width=b["w"])
-                ))
+                for xv in xs_eval:
+                    y_at_z = np.array([hull.get_y_continuous(xv, zi) for zi in z_search])
+                    if np.max(y_at_z) >= y_c:
+                        # Altura Z exata onde a superfície atinge y_c
+                        z_val = float(np.interp(y_c, y_at_z, z_search))
+                        pts_x.append(xv)
+                        pts_z.append(z_val)
+                        
+                if len(pts_x) >= 4:
+                    fig.add_trace(go.Scatter(
+                        x=pts_x, y=pts_z, mode='lines',
+                        name=f"Linha do Alto {cut['name']} (y={y_c:.2f}m)",
+                        line=dict(color=cut["color"], width=cut["w"])
+                    ))
 
-            # Calado Ativo de Análise (T)
+            # 7. Calado Ativo de Análise (T)
             fig.add_hline(
                 y=viz_draft, line_dash="dash", line_color="#00f5d4", line_width=2.5,
                 annotation_text=f"Calado T = {viz_draft:.2f}m", annotation_position="bottom right"
