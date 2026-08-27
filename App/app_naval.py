@@ -10,13 +10,20 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
-from scipy.interpolate import interp1d, PchipInterpolator
+from scipy.interpolate import interp1d, PchipInterpolator, RectBivariateSpline
 
 try:
     import ezdxf
     HAS_EZDXF = True
 except ImportError:
     HAS_EZDXF = False
+
+try:
+    import geomdl
+    from geomdl import BSpline, utilities
+    HAS_GEOMDL = True
+except ImportError:
+    HAS_GEOMDL = False
 
 # ==============================================================================
 # DADOS FIXOS DO ESTUDANTE
@@ -1063,8 +1070,34 @@ else:
                 horizontal=True
             )
 
+        geom_engine_choice = st.radio(
+            "🎛️ Motor de Interpolação e Adoçamento de Superfície:",
+            [
+                "⚡ Motor 1: PCHIP Adoçado Monotônico (SciPy - Ultrarrápido / Recomendado)",
+                "💎 Motor 2: Superfície NURBS & Bicúbica CAD 3D (geomdl + RectBivariateSpline)"
+            ],
+            horizontal=True
+        )
+
         st.write("")
         col_v1, col_v2 = st.columns([1.2, 1])
+
+        use_nurbs = "Motor 2" in geom_engine_choice
+        offsets_mat = np.array([[hull.get_y(j, z) for j in range(len(hull.stations_x))] for z in hull.waterlines_z])
+        try:
+            spline_surf_2d = RectBivariateSpline(
+                hull.waterlines_z, hull.stations_x, offsets_mat,
+                kx=min(3, len(hull.waterlines_z) - 1),
+                ky=min(3, len(hull.stations_x) - 1)
+            )
+        except Exception:
+            spline_surf_2d = None
+
+        def eval_hull_y(x_val, z_val):
+            if use_nurbs and spline_surf_2d is not None:
+                val = float(spline_surf_2d(z_val, x_val)[0][0])
+                return max(0.0, val)
+            return hull.get_y_continuous(x_val, z_val)
 
         # ----------------------------------------------------------------------
         # FUNÇÕES GERADORAS DOS PLANOS 2D
@@ -1084,7 +1117,7 @@ else:
             for j in range(mid_idx, len(hull.stations_x)):
                 x_val = hull.stations_x[j]
                 z_pts = np.linspace(hull.waterlines_z[0], hull.D, 40)
-                y_pts = [hull.get_y(j, z) for z in z_pts]
+                y_pts = [eval_hull_y(x_val, z) for z in z_pts]
                 fig.add_trace(go.Scatter(
                     x=y_pts, y=z_pts, mode='lines',
                     name=f"ST {j} (x={x_val:.2f}m - Proa)",
@@ -1095,7 +1128,7 @@ else:
             for j in range(0, mid_idx + 1):
                 x_val = hull.stations_x[j]
                 z_pts = np.linspace(hull.waterlines_z[0], hull.D, 40)
-                y_pts = [-hull.get_y(j, z) for z in z_pts]
+                y_pts = [-eval_hull_y(x_val, z) for z in z_pts]
                 fig.add_trace(go.Scatter(
                     x=y_pts, y=z_pts, mode='lines',
                     name=f"ST {j} (x={x_val:.2f}m - Popa)",
@@ -1109,7 +1142,7 @@ else:
             )
             
             fig.update_layout(
-                title="Plano de Balizas (Body Plan) — [Esquerda: Popa | Direita: Proa]",
+                title=f"Plano de Balizas (Body Plan) — [{'💎 NURBS / Bicubic CAD' if use_nurbs else '⚡ PCHIP Monotônico'}]",
                 xaxis_title="Semi-boca Y (m) [← Bombordo | Boreste →]",
                 yaxis_title="Cota Vertical Z (m) [Linha de Base BL = 0]",
                 template="plotly_dark", height=480, margin=dict(l=20, r=20, t=40, b=20),
@@ -1119,7 +1152,7 @@ else:
 
         def get_waterlines_figure():
             fig = go.Figure()
-            xs_eval = np.linspace(hull.stations_x[0], hull.stations_x[-1], 160)
+            xs_eval = np.linspace(hull.stations_x[0], hull.stations_x[-1], 180)
             
             # 1. Malha de Referência (Grid): Balizas verticais (ST 00 a ST 10/20)
             for j, st_x in enumerate(hull.stations_x):
@@ -1146,7 +1179,7 @@ else:
             for k, wz in enumerate(hull.waterlines_z):
                 if wz <= 0.0:
                     continue
-                ys_half = np.array([hull.get_y_continuous(xv, wz) for xv in xs_eval])
+                ys_half = np.array([eval_hull_y(xv, wz) for xv in xs_eval])
                 x_full = np.concatenate([xs_eval, xs_eval[::-1]])
                 y_full = np.concatenate([ys_half, -ys_half[::-1]])
                 
@@ -1158,7 +1191,7 @@ else:
                 ))
 
             # 3. Linha d'Água Ativa no Calado Selecionado (T) com Preenchimento do Plano de Flutuação
-            ys_act_half = np.array([hull.get_y_continuous(xv, viz_draft) for xv in xs_eval])
+            ys_act_half = np.array([eval_hull_y(xv, viz_draft) for xv in xs_eval])
             x_act_full = np.concatenate([xs_eval, xs_eval[::-1]])
             y_act_full = np.concatenate([ys_act_half, -ys_act_half[::-1]])
             
@@ -1170,7 +1203,7 @@ else:
             ))
 
             # 4. Fechamento do Espelho de Popa (ST 00)
-            y_t_deck = hull.get_y_continuous(hull.stations_x[0], hull.D)
+            y_t_deck = eval_hull_y(hull.stations_x[0], hull.D)
             fig.add_trace(go.Scatter(
                 x=[hull.stations_x[0], hull.stations_x[0]], y=[-y_t_deck, y_t_deck], mode='lines',
                 name="Espelho de Popa (PR)",
@@ -1178,7 +1211,7 @@ else:
             ))
 
             fig.update_layout(
-                title="Plano de Linhas d'Água (Half-Breadth Plan / Vista Superior Completa — Casco Inteiro)",
+                title=f"Plano de Linhas d'Água (Half-Breadth Plan) — [{'💎 Superfície NURBS & Bicúbica CAD' if use_nurbs else '⚡ PCHIP Monotônico'}]",
                 xaxis_title="Comprimento Longitudinal X (m) [PR (Popa) → SM (Meia-Nau) → PV (Proa)]",
                 yaxis_title="Boca Transversal Y (m) [← Bombordo | Boreste →]",
                 template="plotly_dark", height=520, margin=dict(l=25, r=25, t=45, b=25),
@@ -1273,7 +1306,7 @@ else:
                 pts_x, pts_z = [], []
                 
                 # Início no espelho de popa (ST 00)
-                y_transom = [hull.get_y(0, z) for z in zs]
+                y_transom = [eval_hull_y(x0, z) for z in zs]
                 if np.max(y_transom) >= yc:
                     z_start = float(np.interp(yc, y_transom, zs))
                     pts_x.append(x0)
@@ -1281,7 +1314,7 @@ else:
 
                 # Pontos intermediários em cada estação transversal
                 for j, xj in enumerate(xs):
-                    y_col = [hull.get_y(j, z) for z in zs]
+                    y_col = [eval_hull_y(xj, z) for z in zs]
                     if np.max(y_col) >= yc:
                         if y_col[0] >= yc:
                             zj = 0.0
@@ -1292,7 +1325,7 @@ else:
                             pts_z.append(zj)
 
                 # Ponto de término no convés na proa
-                deck_widths = [hull.get_y(j, hull.D) for j in range(len(xs))]
+                deck_widths = [eval_hull_y(xj, hull.D) for xj in xs]
                 if np.max(deck_widths) >= yc:
                     x_term = float(np.interp(yc, deck_widths[::-1], xs[::-1]))
                     z_term = float(pchip_deck(x_term))
@@ -1318,7 +1351,7 @@ else:
             )
 
             fig.update_layout(
-                title="Plano de Linhas do Alto (Sheer / Buttock Plan — Extração Exata Baliza por Baliza)",
+                title=f"Plano de Linhas do Alto (Sheer / Buttocks) — [{'💎 Superfície NURBS & Bicúbica CAD' if use_nurbs else '⚡ PCHIP Monotônico'}]",
                 xaxis_title="Comprimento Longitudinal X (m) [PR (Popa) → SM (Meia-Nau) → PV (Proa)]",
                 yaxis_title="Altura Vertical Z (m) a partir da Linha de Base (LB)",
                 yaxis=dict(range=[-0.05, float(z_deck_dense[-1]) + 0.15]),
