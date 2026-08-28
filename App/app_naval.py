@@ -1287,14 +1287,13 @@ else:
                 line=dict(color="#ffffff", width=3.2)
             ))
 
-            # 6. Linhas do Alto (Cortes Longitudinais com curvas de adoçamento naval contínuas)
+            # 6. Linhas do Alto (Cortes Longitudinais com adoçamento suave e sem cruzamento)
             cuts_specs = [
-                {"name": "Corte I (Y = 0.15 B)", "frac": 0.15, "color": "#f43f5e"},
-                {"name": "Corte II (Y = 0.30 B)", "frac": 0.30, "color": "#fb923c"},
-                {"name": "Corte III (Y = 0.45 B)", "frac": 0.45, "color": "#facc15"},
-                {"name": "Corte IV (Y = 0.60 B)", "frac": 0.60, "color": "#22c55e"},
-                {"name": "Corte V (Y = 0.75 B)", "frac": 0.75, "color": "#06b6d4"},
-                {"name": "Corte VI (Y = 0.90 B)", "frac": 0.90, "color": "#3b82f6"}
+                {"name": "Corte I (Y = 0.18 B)", "frac": 0.18, "color": "#f43f5e"},
+                {"name": "Corte II (Y = 0.36 B)", "frac": 0.36, "color": "#fb923c"},
+                {"name": "Corte III (Y = 0.54 B)", "frac": 0.54, "color": "#facc15"},
+                {"name": "Corte IV (Y = 0.72 B)", "frac": 0.72, "color": "#22c55e"},
+                {"name": "Corte V (Y = 0.90 B)", "frac": 0.90, "color": "#38bdf8"}
             ]
 
             x_mid = float(xs[len(xs) // 2])
@@ -1302,38 +1301,31 @@ else:
             for cut in cuts_specs:
                 yc = (hull.B / 2.0) * cut["frac"]
                 
-                # 1. Altura mínima na meia-nau (onde a baliza é mais bojuda)
+                # 1. Altura mínima na meia-nau (lida da tabela com garantia de ordem estrita)
                 col_mid = np.array([hull.get_y_continuous(x_mid, z) for z in zs_scan])
                 if np.max(col_mid) >= yc:
                     z_min = float(np.interp(yc, col_mid, zs_scan))
                 else:
-                    z_min = float(D_nom * (0.15 + 0.65 * cut["frac"]))
+                    z_min = float(D_nom * (0.10 + 0.75 * cut["frac"]))
 
-                # 2. Altura na popa (ST 00)
+                # 2. Altura no espelho de popa (ST 00)
                 col_0 = np.array([hull.get_y_continuous(x0, z) for z in zs_scan])
                 if np.max(col_0) >= yc:
                     z_stern = float(np.interp(yc, col_0, zs_scan))
                 else:
-                    z_stern = float(min(D_nom, z_min + 0.35 + 0.40 * cut["frac"]))
+                    z_stern = float(min(D_nom, z_min + 0.30 + 0.40 * cut["frac"]))
 
-                # 3. Traçado contínuo suave de proa a popa (Adoçamento Naval Parabólico-Cúbico C1/C2)
-                # Da meia-nau para a proa: curva suave partindo de (x_end, D_nom) descendo até (x_mid, z_min) com tangente nula
-                # Da meia-nau para a popa: curva suave partindo de (x_mid, z_min) subindo até (x0, z_stern)
+                # 3. Traçado contínuo suave e estritamente não-interceptante (Tangente nula dZ/dX = 0 na meia-nau)
                 xs_cut = np.linspace(x0, x_end, 150)
                 zs_cut = []
-
-                # Expoente amplamente diferenciado para abrir um leque bem visível e espaçado na proa:
-                # Corte I mergulha suavemente para a quilha logo no início; Corte VI sustenta a borda do convés
-                exp_bow = 0.70 + 3.20 * (cut["frac"] ** 1.4)
-                exp_stern = 1.10 + 1.60 * (cut["frac"] ** 1.2)
 
                 for x in xs_cut:
                     if x >= x_mid:
                         t = (x - x_mid) / (x_end - x_mid)
-                        z_val = z_min + (D_nom - z_min) * (t ** exp_bow)
+                        z_val = z_min + (D_nom - z_min) * (t ** 2.2)
                     else:
                         t = (x_mid - x) / (x_mid - x0)
-                        z_val = z_min + (z_stern - z_min) * (t ** exp_stern)
+                        z_val = z_min + (z_stern - z_min) * (t ** 2.0)
                     zs_cut.append(z_val)
 
                 zs_cut = np.array(zs_cut)
@@ -1409,12 +1401,11 @@ else:
         # 1. Linhas do Alto em 3D (Opcionais via Toggle do Usuário)
         if show_3d_buttocks:
             cuts_specs_3d = [
-                {"name": "Corte I (Y = 0.15 B)", "frac": 0.15, "color": "#f43f5e"},
-                {"name": "Corte II (Y = 0.30 B)", "frac": 0.30, "color": "#fb923c"},
-                {"name": "Corte III (Y = 0.45 B)", "frac": 0.45, "color": "#facc15"},
-                {"name": "Corte IV (Y = 0.60 B)", "frac": 0.60, "color": "#22c55e"},
-                {"name": "Corte V (Y = 0.75 B)", "frac": 0.75, "color": "#06b6d4"},
-                {"name": "Corte VI (Y = 0.90 B)", "frac": 0.90, "color": "#3b82f6"}
+                {"name": "Corte I (Y = 0.18 B)", "frac": 0.18, "color": "#f43f5e"},
+                {"name": "Corte II (Y = 0.36 B)", "frac": 0.36, "color": "#fb923c"},
+                {"name": "Corte III (Y = 0.54 B)", "frac": 0.54, "color": "#facc15"},
+                {"name": "Corte IV (Y = 0.72 B)", "frac": 0.72, "color": "#22c55e"},
+                {"name": "Corte V (Y = 0.90 B)", "frac": 0.90, "color": "#38bdf8"}
             ]
             zs_scan_3d = np.linspace(0.0, d_nom_3d, 60)
             
@@ -1423,29 +1414,26 @@ else:
                 
                 # Altura mínima na meia-nau
                 col_m = np.array([hull.get_y_continuous(x_mid_3d, z) for z in zs_scan_3d])
-                z_min_3d = float(np.interp(yc, col_m, zs_scan_3d)) if np.max(col_m) >= yc else float(d_nom_3d * (0.15 + 0.65 * cut["frac"]))
+                z_min_3d = float(np.interp(yc, col_m, zs_scan_3d)) if np.max(col_m) >= yc else float(d_nom_3d * (0.10 + 0.75 * cut["frac"]))
                 
                 # Altura na popa
                 col_p = np.array([hull.get_y_continuous(0.0, z) for z in zs_scan_3d])
-                z_stern_3d = float(np.interp(yc, col_p, zs_scan_3d)) if np.max(col_p) >= yc else float(min(d_nom_3d, z_min_3d + 0.35 + 0.40 * cut["frac"]))
-                
-                exp_b = 0.70 + 3.20 * (cut["frac"] ** 1.4)
-                exp_s = 1.10 + 1.60 * (cut["frac"] ** 1.2)
+                z_stern_3d = float(np.interp(yc, col_p, zs_scan_3d)) if np.max(col_p) >= yc else float(min(d_nom_3d, z_min_3d + 0.30 + 0.40 * cut["frac"]))
                 
                 pts_x, pts_y, pts_z = [], [], []
                 for x in xs_dense_3d:
                     if x >= x_mid_3d:
                         t = (x - x_mid_3d) / (x_end_3d - x_mid_3d)
-                        z_val = z_min_3d + (d_nom_3d - z_min_3d) * (t ** exp_b)
+                        z_val = z_min_3d + (d_nom_3d - z_min_3d) * (t ** 2.2)
+                        # Transição suave de Y para o bico de proa
+                        y_val = yc * (1.0 - (t ** 3.0))
                     else:
                         t = (x_mid_3d - x) / x_mid_3d
-                        z_val = z_min_3d + (z_stern_3d - z_min_3d) * (t ** exp_s)
-                    
-                    # Coordenada Y extraída diretamente da casca 3D real do navio
-                    y_surface = float(hull.get_y_continuous(x, z_val))
+                        z_val = z_min_3d + (z_stern_3d - z_min_3d) * (t ** 2.0)
+                        y_val = yc
                     
                     pts_x.append(x)
-                    pts_y.append(y_surface)
+                    pts_y.append(y_val)
                     pts_z.append(z_val)
                     
                 # Boreste (+Y)
