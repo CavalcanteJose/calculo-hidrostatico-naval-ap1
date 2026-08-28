@@ -1322,10 +1322,10 @@ else:
                 xs_cut = np.linspace(x0, x_end, 150)
                 zs_cut = []
 
-                # Expoente progressivo diferenciado para abrir e espaçar o leque na proa:
-                # Cortes internos descem mais cedo para a quilha; cortes externos sustentam a altura no costado
-                exp_bow = 1.35 + 2.4 * (cut["frac"] ** 1.3)
-                exp_stern = 1.40 + 1.2 * (cut["frac"] ** 1.2)
+                # Expoente amplamente diferenciado para abrir um leque bem visível e espaçado na proa:
+                # Corte I mergulha suavemente para a quilha logo no início; Corte VI sustenta a borda do convés
+                exp_bow = 0.70 + 3.20 * (cut["frac"] ** 1.4)
+                exp_stern = 1.10 + 1.60 * (cut["frac"] ** 1.2)
 
                 for x in xs_cut:
                     if x >= x_mid:
@@ -1376,7 +1376,16 @@ else:
         # ----------------------------------------------------------------------
         # CASCO 3D (EM CONTAINER COMPLETO ABAIXO DO PLANO 2D)
         # ----------------------------------------------------------------------
-        st.markdown("#### 🌐 Casco Tridimensional (3D Mesh Suave + Cortes do Plano de Linhas)")
+        col_3d_title, col_3d_toggle = st.columns([3, 2])
+        with col_3d_title:
+            st.markdown("#### 🌐 Casco Tridimensional (3D Mesh Suave)")
+        with col_3d_toggle:
+            show_3d_buttocks = st.toggle(
+                "📐 Exibir Linhas do Alto no Casco 3D",
+                value=True,
+                help="Ative ou desative as linhas de corte do Plano de Linhas do Alto sobre a superfície 3D."
+            )
+
         xs_3d = np.linspace(hull.stations_x[0], hull.stations_x[-1], 50)
         zs_3d = np.linspace(hull.waterlines_z[0], hull.D, 35)
         
@@ -1397,59 +1406,60 @@ else:
         x_end_3d = float(hull.stations_x[-1])
         d_nom_3d = float(hull.D)
         
-        # 1. Linhas do Alto em 3D (Cortes Longitudinais Suaves partindo do ápice da proa X=9.112, Y=0, Z=1.80)
-        cuts_specs_3d = [
-            {"name": "Corte I (Y = 0.15 B)", "frac": 0.15, "color": "#f43f5e"},
-            {"name": "Corte II (Y = 0.30 B)", "frac": 0.30, "color": "#fb923c"},
-            {"name": "Corte III (Y = 0.45 B)", "frac": 0.45, "color": "#facc15"},
-            {"name": "Corte IV (Y = 0.60 B)", "frac": 0.60, "color": "#22c55e"},
-            {"name": "Corte V (Y = 0.75 B)", "frac": 0.75, "color": "#06b6d4"},
-            {"name": "Corte VI (Y = 0.90 B)", "frac": 0.90, "color": "#3b82f6"}
-        ]
-        zs_scan_3d = np.linspace(0.0, d_nom_3d, 60)
-        
-        for cut in cuts_specs_3d:
-            yc = (hull.B / 2.0) * cut["frac"]
+        # 1. Linhas do Alto em 3D (Opcionais via Toggle do Usuário)
+        if show_3d_buttocks:
+            cuts_specs_3d = [
+                {"name": "Corte I (Y = 0.15 B)", "frac": 0.15, "color": "#f43f5e"},
+                {"name": "Corte II (Y = 0.30 B)", "frac": 0.30, "color": "#fb923c"},
+                {"name": "Corte III (Y = 0.45 B)", "frac": 0.45, "color": "#facc15"},
+                {"name": "Corte IV (Y = 0.60 B)", "frac": 0.60, "color": "#22c55e"},
+                {"name": "Corte V (Y = 0.75 B)", "frac": 0.75, "color": "#06b6d4"},
+                {"name": "Corte VI (Y = 0.90 B)", "frac": 0.90, "color": "#3b82f6"}
+            ]
+            zs_scan_3d = np.linspace(0.0, d_nom_3d, 60)
             
-            # Altura mínima na meia-nau
-            col_m = np.array([hull.get_y_continuous(x_mid_3d, z) for z in zs_scan_3d])
-            z_min_3d = float(np.interp(yc, col_m, zs_scan_3d)) if np.max(col_m) >= yc else float(d_nom_3d * (0.15 + 0.65 * cut["frac"]))
-            
-            # Altura na popa
-            col_p = np.array([hull.get_y_continuous(0.0, z) for z in zs_scan_3d])
-            z_stern_3d = float(np.interp(yc, col_p, zs_scan_3d)) if np.max(col_p) >= yc else float(min(d_nom_3d, z_min_3d + 0.35 + 0.40 * cut["frac"]))
-            
-            exp_b = 1.35 + 2.4 * (cut["frac"] ** 1.3)
-            exp_s = 1.40 + 1.2 * (cut["frac"] ** 1.2)
-            
-            pts_x, pts_y, pts_z = [], [], []
-            for x in xs_dense_3d:
-                if x >= x_mid_3d:
-                    t = (x - x_mid_3d) / (x_end_3d - x_mid_3d)
-                    z_val = z_min_3d + (d_nom_3d - z_min_3d) * (t ** exp_b)
-                else:
-                    t = (x_mid_3d - x) / x_mid_3d
-                    z_val = z_min_3d + (z_stern_3d - z_min_3d) * (t ** exp_s)
+            for cut in cuts_specs_3d:
+                yc = (hull.B / 2.0) * cut["frac"]
                 
-                # Coordenada Y extraída diretamente da casca 3D real do navio
-                y_surface = float(hull.get_y_continuous(x, z_val))
+                # Altura mínima na meia-nau
+                col_m = np.array([hull.get_y_continuous(x_mid_3d, z) for z in zs_scan_3d])
+                z_min_3d = float(np.interp(yc, col_m, zs_scan_3d)) if np.max(col_m) >= yc else float(d_nom_3d * (0.15 + 0.65 * cut["frac"]))
                 
-                pts_x.append(x)
-                pts_y.append(y_surface)
-                pts_z.append(z_val)
+                # Altura na popa
+                col_p = np.array([hull.get_y_continuous(0.0, z) for z in zs_scan_3d])
+                z_stern_3d = float(np.interp(yc, col_p, zs_scan_3d)) if np.max(col_p) >= yc else float(min(d_nom_3d, z_min_3d + 0.35 + 0.40 * cut["frac"]))
                 
-            # Boreste (+Y)
-            fig_3d.add_trace(go.Scatter3d(
-                x=pts_x, y=pts_y, z=pts_z,
-                mode='lines', line=dict(color=cut["color"], width=5.5),
-                name=f"3D: {cut['name']}"
-            ))
-            # Bombordo (-Y)
-            fig_3d.add_trace(go.Scatter3d(
-                x=pts_x, y=[-y for y in pts_y], z=pts_z,
-                mode='lines', line=dict(color=cut["color"], width=5.5),
-                showlegend=False
-            ))
+                exp_b = 0.70 + 3.20 * (cut["frac"] ** 1.4)
+                exp_s = 1.10 + 1.60 * (cut["frac"] ** 1.2)
+                
+                pts_x, pts_y, pts_z = [], [], []
+                for x in xs_dense_3d:
+                    if x >= x_mid_3d:
+                        t = (x - x_mid_3d) / (x_end_3d - x_mid_3d)
+                        z_val = z_min_3d + (d_nom_3d - z_min_3d) * (t ** exp_b)
+                    else:
+                        t = (x_mid_3d - x) / x_mid_3d
+                        z_val = z_min_3d + (z_stern_3d - z_min_3d) * (t ** exp_s)
+                    
+                    # Coordenada Y extraída diretamente da casca 3D real do navio
+                    y_surface = float(hull.get_y_continuous(x, z_val))
+                    
+                    pts_x.append(x)
+                    pts_y.append(y_surface)
+                    pts_z.append(z_val)
+                    
+                # Boreste (+Y)
+                fig_3d.add_trace(go.Scatter3d(
+                    x=pts_x, y=pts_y, z=pts_z,
+                    mode='lines', line=dict(color=cut["color"], width=5.5),
+                    name=f"3D: {cut['name']}"
+                ))
+                # Bombordo (-Y)
+                fig_3d.add_trace(go.Scatter3d(
+                    x=pts_x, y=[-y for y in pts_y], z=pts_z,
+                    mode='lines', line=dict(color=cut["color"], width=5.5),
+                    showlegend=False
+                ))
 
         # 3. Quilha e Roda de Proa em 3D (Y = 0 — sobe continuamente até o bico do convés em x_end, D)
         keel_stem_3d_x = [float(hull.stations_x[0]), float(hull.stations_x[len(hull.stations_x)//2])]
