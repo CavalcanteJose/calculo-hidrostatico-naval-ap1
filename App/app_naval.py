@@ -1289,11 +1289,11 @@ else:
 
             # 6. Linhas do Alto (Cortes Longitudinais Suaves até o Ápice da Proa, 100% Casados com o Casco)
             cuts_specs = [
-                {"name": "Corte I (Y = 0.15 B)", "frac": 0.15, "exp_bow": 3.20, "exp_stern": 1.90, "color": "#f43f5e"},
-                {"name": "Corte II (Y = 0.32 B)", "frac": 0.32, "exp_bow": 2.60, "exp_stern": 1.85, "color": "#fb923c"},
-                {"name": "Corte III (Y = 0.50 B)", "frac": 0.50, "exp_bow": 2.10, "exp_stern": 1.80, "color": "#facc15"},
-                {"name": "Corte IV (Y = 0.70 B)", "frac": 0.70, "exp_bow": 1.65, "exp_stern": 1.75, "color": "#22c55e"},
-                {"name": "Corte V (Y = 0.88 B)", "frac": 0.88, "exp_bow": 1.30, "exp_stern": 1.70, "color": "#38bdf8"}
+                {"name": "Corte I (Y = 0.15 B)", "frac": 0.15, "exp_bow": 4.20, "exp_stern": 1.90, "color": "#f43f5e"},
+                {"name": "Corte II (Y = 0.32 B)", "frac": 0.32, "exp_bow": 3.40, "exp_stern": 1.85, "color": "#fb923c"},
+                {"name": "Corte III (Y = 0.50 B)", "frac": 0.50, "exp_bow": 2.70, "exp_stern": 1.80, "color": "#facc15"},
+                {"name": "Corte IV (Y = 0.70 B)", "frac": 0.70, "exp_bow": 2.05, "exp_stern": 1.75, "color": "#22c55e"},
+                {"name": "Corte V (Y = 0.88 B)", "frac": 0.88, "exp_bow": 1.45, "exp_stern": 1.70, "color": "#38bdf8"}
             ]
 
             x_mid = float(xs[len(xs) // 2])
@@ -1397,11 +1397,11 @@ else:
         # 1. Linhas do Alto e Quilha em 3D (Opcionais via Toggle do Usuário)
         if show_3d_buttocks:
             cuts_specs_3d = [
-                {"name": "Corte I (Y = 0.15 B)", "frac": 0.15, "exp_bow": 3.20, "exp_stern": 1.90, "color": "#f43f5e"},
-                {"name": "Corte II (Y = 0.32 B)", "frac": 0.32, "exp_bow": 2.60, "exp_stern": 1.85, "color": "#fb923c"},
-                {"name": "Corte III (Y = 0.50 B)", "frac": 0.50, "exp_bow": 2.10, "exp_stern": 1.80, "color": "#facc15"},
-                {"name": "Corte IV (Y = 0.70 B)", "frac": 0.70, "exp_bow": 1.65, "exp_stern": 1.75, "color": "#22c55e"},
-                {"name": "Corte V (Y = 0.88 B)", "frac": 0.88, "exp_bow": 1.30, "exp_stern": 1.70, "color": "#38bdf8"}
+                {"name": "Corte I (Y = 0.15 B)", "frac": 0.15, "exp_bow": 4.20, "exp_stern": 1.90, "color": "#f43f5e"},
+                {"name": "Corte II (Y = 0.32 B)", "frac": 0.32, "exp_bow": 3.40, "exp_stern": 1.85, "color": "#fb923c"},
+                {"name": "Corte III (Y = 0.50 B)", "frac": 0.50, "exp_bow": 2.70, "exp_stern": 1.80, "color": "#facc15"},
+                {"name": "Corte IV (Y = 0.70 B)", "frac": 0.70, "exp_bow": 2.05, "exp_stern": 1.75, "color": "#22c55e"},
+                {"name": "Corte V (Y = 0.88 B)", "frac": 0.88, "exp_bow": 1.45, "exp_stern": 1.70, "color": "#38bdf8"}
             ]
 
             for cut in cuts_specs_3d:
