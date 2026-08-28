@@ -1565,25 +1565,27 @@ else:
                 if x >= x_mid_3d:
                     t = (x - x_mid_3d) / (x_end_3d - x_mid_3d)
                     z_val = z_min_3d + (d_nom_3d - z_min_3d) * (t ** exp_b)
-                    y_val = yc * (1.0 - (t ** 2.2))
                 else:
                     t = (x_mid_3d - x) / x_mid_3d
                     z_val = z_min_3d + (z_stern_3d - z_min_3d) * (t ** exp_s)
-                    y_val = yc
+                
+                # Coordenada Y extraída diretamente da casca 3D real do navio
+                y_surface = float(hull.get_y_continuous(x, z_val))
+                
                 pts_x.append(x)
-                pts_y.append(y_val)
+                pts_y.append(y_surface)
                 pts_z.append(z_val)
                 
             # Boreste (+Y)
             fig_3d.add_trace(go.Scatter3d(
                 x=pts_x, y=pts_y, z=pts_z,
-                mode='lines', line=dict(color=cut["color"], width=4.5),
+                mode='lines', line=dict(color=cut["color"], width=5.5),
                 name=f"3D: {cut['name']}"
             ))
             # Bombordo (-Y)
             fig_3d.add_trace(go.Scatter3d(
                 x=pts_x, y=[-y for y in pts_y], z=pts_z,
-                mode='lines', line=dict(color=cut["color"], width=4.5),
+                mode='lines', line=dict(color=cut["color"], width=5.5),
                 showlegend=False
             ))
 
