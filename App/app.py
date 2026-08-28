@@ -1322,9 +1322,10 @@ else:
                 xs_cut = np.linspace(x0, x_end, 150)
                 zs_cut = []
 
-                # Expoente de abertura da proa (flare exponencial de acordo com a posição do corte)
-                exp_bow = 2.0 + 0.4 * (1.0 - cut["frac"])
-                exp_stern = 1.8 + 0.3 * (1.0 - cut["frac"])
+                # Expoente progressivo diferenciado para abrir e espaçar o leque na proa:
+                # Cortes internos descem mais cedo para a quilha; cortes externos sustentam a altura no costado
+                exp_bow = 1.35 + 2.4 * (cut["frac"] ** 1.3)
+                exp_stern = 1.40 + 1.2 * (cut["frac"] ** 1.2)
 
                 for x in xs_cut:
                     if x >= x_mid:
@@ -1340,7 +1341,7 @@ else:
                 fig.add_trace(go.Scatter(
                     x=xs_cut, y=zs_cut, mode='lines',
                     name=f"Linha do Alto {cut['name']}",
-                    line=dict(color=cut["color"], width=2.5)
+                    line=dict(color=cut["color"], width=2.6)
                 ))
 
             # 7. Calado de Análise
@@ -1418,8 +1419,8 @@ else:
             col_p = np.array([hull.get_y_continuous(0.0, z) for z in zs_scan_3d])
             z_stern_3d = float(np.interp(yc, col_p, zs_scan_3d)) if np.max(col_p) >= yc else float(min(d_nom_3d, z_min_3d + 0.35 + 0.40 * cut["frac"]))
             
-            exp_b = 2.0 + 0.4 * (1.0 - cut["frac"])
-            exp_s = 1.8 + 0.3 * (1.0 - cut["frac"])
+            exp_b = 1.35 + 2.4 * (cut["frac"] ** 1.3)
+            exp_s = 1.40 + 1.2 * (cut["frac"] ** 1.2)
             
             pts_x, pts_y, pts_z = [], [], []
             for x in xs_dense_3d:
