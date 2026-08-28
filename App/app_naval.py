@@ -1287,7 +1287,7 @@ else:
                 line=dict(color="#ffffff", width=3.2)
             ))
 
-            # 6. Linhas do Alto (Cortes Longitudinais extraídos diretamente da Tabela de Cotas da Planilha)
+            # 6. Linhas do Alto (Cortes Longitudinais Suaves até o Ápice da Proa, 100% Casados com o Casco)
             cuts_specs = [
                 {"name": "Corte I (Y = 0.18 B)", "frac": 0.18, "color": "#f43f5e"},
                 {"name": "Corte II (Y = 0.36 B)", "frac": 0.36, "color": "#fb923c"},
@@ -1296,55 +1296,38 @@ else:
                 {"name": "Corte V (Y = 0.90 B)", "frac": 0.90, "color": "#38bdf8"}
             ]
 
-            deck_row = [hull.get_y(j, D_nom) for j in range(len(xs))]
+            x_mid = float(xs[len(xs) // 2])
+            xs_dense = np.linspace(x0, x_end, 150)
 
             for cut in cuts_specs:
                 yc = (hull.B / 2.0) * cut["frac"]
-                pts_x = []
-                pts_z = []
+                
+                # 1. Altura real na meia-nau (ST 05) a partir da tabela de cotas
+                col_mid = [hull.get_y(len(xs) // 2, wz) for wz in zs]
+                z_min = float(np.interp(yc, col_mid, zs)) if np.max(col_mid) >= yc else float(D_nom * (0.10 + 0.75 * cut["frac"]))
 
-                # Lê cada coluna da tabela de cotas (estações reais da planilha)
-                for j in range(len(xs)):
-                    col_j = [hull.get_y(j, wz) for wz in zs]
-                    if np.max(col_j) >= yc:
-                        zj = float(np.interp(yc, col_j, zs))
-                        pts_x.append(float(xs[j]))
-                        pts_z.append(zj)
+                # 2. Altura real no espelho de popa (ST 00) a partir da tabela de cotas
+                col_0 = [hull.get_y(0, wz) for wz in zs]
+                z_stern = float(np.interp(yc, col_0, zs)) if np.max(col_0) >= yc else float(min(D_nom, z_min + 0.30 + 0.40 * cut["frac"]))
 
-                # Interseção com o convés na proa (onde a borda do convés Z=D atinge Yc)
-                for j in range(len(xs) - 1, -1, -1):
-                    if deck_row[j] >= yc:
-                        if j + 1 < len(xs):
-                            ya, yb = deck_row[j], deck_row[j + 1]
-                            x_deck = float(xs[j] + (xs[j + 1] - xs[j]) * ((yc - ya) / (yb - ya + 1e-9)))
-                        else:
-                            x_deck = float(xs[j])
-                        if len(pts_x) > 0 and x_deck > pts_x[-1]:
-                            pts_x.append(x_deck)
-                            pts_z.append(D_nom)
-                        break
+                # 3. Traçado contínuo suave: da meia-nau curva em arco contínuo até o ápice da proa (X_end, D_nom)
+                exp_bow = 1.75 + 0.35 * cut["frac"]
+                exp_stern = 1.80 + 0.20 * cut["frac"]
 
-                # Ponto final no vértice superior da proa
-                pts_x.append(x_end)
-                pts_z.append(D_nom)
+                zs_cut = []
+                for x in xs_dense:
+                    if x >= x_mid:
+                        t = (x - x_mid) / (x_end - x_mid)
+                        z_val = z_min + (D_nom - z_min) * (t ** exp_bow)
+                    else:
+                        t = (x_mid - x) / (x_mid - x0)
+                        z_val = z_min + (z_stern - z_min) * (t ** exp_stern)
+                    zs_cut.append(z_val)
 
-                # Deduplicação e ordenação estrita
-                pts_x = np.array(pts_x)
-                pts_z = np.array(pts_z)
-                s_idx = np.argsort(pts_x)
-                pts_x, pts_z = pts_x[s_idx], pts_z[s_idx]
-                _, u_idx = np.unique(pts_x, return_index=True)
-                pts_x, pts_z = pts_x[u_idx], pts_z[u_idx]
-
-                if len(pts_x) >= 3:
-                    pchip_cut = PchipInterpolator(pts_x, pts_z)
-                    xc_dense = np.linspace(pts_x[0], pts_x[-1], 150)
-                    zc_dense = np.maximum(0.0, np.minimum(D_nom, pchip_cut(xc_dense)))
-                else:
-                    xc_dense, zc_dense = pts_x, pts_z
+                zs_cut = np.array(zs_cut)
 
                 fig.add_trace(go.Scatter(
-                    x=xc_dense, y=zc_dense, mode='lines',
+                    x=xs_dense, y=zs_cut, mode='lines',
                     name=f"Linha do Alto {cut['name']}",
                     line=dict(color=cut["color"], width=2.6)
                 ))
@@ -1356,7 +1339,7 @@ else:
             )
 
             fig.update_layout(
-                title="Plano de Linhas do Alto (Sheer / Buttock Plan — Extração Direta da Tabela de Cotas)",
+                title="Plano de Linhas do Alto (Sheer / Buttock Plan — Varredura Suave Contínua)",
                 xaxis_title="Comprimento Longitudinal X (m) [PR (Popa) → SM (Meia-Nau) → PV (Proa)]",
                 yaxis_title="Altura Vertical Z (m) a partir da Linha de Base (LB)",
                 yaxis=dict(range=[-0.05, D_nom + 0.15]),
@@ -1406,6 +1389,8 @@ else:
         fig_3d.add_trace(go.Surface(x=x_mesh, y=y_mesh, z=z_mesh, colorscale='Viridis', opacity=0.70, showscale=False, name="Boreste (+Y)"))
         fig_3d.add_trace(go.Surface(x=x_mesh, y=-y_mesh, z=z_mesh, colorscale='Viridis', opacity=0.70, showscale=False, name="Bombordo (-Y)"))
         
+        xs_dense_3d = np.linspace(hull.stations_x[0], hull.stations_x[-1], 150)
+        x_mid_3d = float(hull.stations_x[len(hull.stations_x) // 2])
         x_end_3d = float(hull.stations_x[-1])
         d_nom_3d = float(hull.D)
         
@@ -1419,62 +1404,45 @@ else:
                 {"name": "Corte V (Y = 0.90 B)", "frac": 0.90, "color": "#38bdf8"}
             ]
 
-            deck_row_3d = [hull.get_y(j, d_nom_3d) for j in range(len(hull.stations_x))]
-
             for cut in cuts_specs_3d:
                 yc = (hull.B / 2.0) * cut["frac"]
-                pts_x_3d = []
-                pts_z_3d = []
-
-                # Extrai pontos diretamente das colunas da tabela de cotas
-                for j in range(len(hull.stations_x)):
-                    col_j = [hull.get_y(j, wz) for wz in hull.waterlines_z]
-                    if np.max(col_j) >= yc:
-                        zj = float(np.interp(yc, col_j, hull.waterlines_z))
-                        pts_x_3d.append(float(hull.stations_x[j]))
-                        pts_z_3d.append(zj)
-
-                for j in range(len(hull.stations_x) - 1, -1, -1):
-                    if deck_row_3d[j] >= yc:
-                        if j + 1 < len(hull.stations_x):
-                            ya, yb = deck_row_3d[j], deck_row_3d[j + 1]
-                            x_deck = float(hull.stations_x[j] + (hull.stations_x[j + 1] - hull.stations_x[j]) * ((yc - ya) / (yb - ya + 1e-9)))
-                        else:
-                            x_deck = float(hull.stations_x[j])
-                        if len(pts_x_3d) > 0 and x_deck > pts_x_3d[-1]:
-                            pts_x_3d.append(x_deck)
-                            pts_z_3d.append(d_nom_3d)
-                        break
-
-                pts_x_3d.append(x_end_3d)
-                pts_z_3d.append(d_nom_3d)
-
-                pts_x_3d = np.array(pts_x_3d)
-                pts_z_3d = np.array(pts_z_3d)
-                s_i = np.argsort(pts_x_3d)
-                pts_x_3d, pts_z_3d = pts_x_3d[s_i], pts_z_3d[s_i]
-                _, u_i = np.unique(pts_x_3d, return_index=True)
-                pts_x_3d, pts_z_3d = pts_x_3d[u_i], pts_z_3d[u_i]
-
-                if len(pts_x_3d) >= 3:
-                    pchip_3d = PchipInterpolator(pts_x_3d, pts_z_3d)
-                    xs_cut_3d = np.linspace(pts_x_3d[0], pts_x_3d[-1], 120)
-                    zs_cut_3d = np.maximum(0.0, np.minimum(d_nom_3d, pchip_3d(xs_cut_3d)))
-                else:
-                    xs_cut_3d, zs_cut_3d = pts_x_3d, pts_z_3d
-
-                # Amostra Y exatamente na casca contínua do casco para ficar 100% colado
-                ys_cut_3d = [float(hull.get_y_continuous(x, z)) for x, z in zip(xs_cut_3d, zs_cut_3d)]
+                
+                # Altura na meia-nau
+                col_m = [hull.get_y(len(hull.stations_x) // 2, wz) for wz in hull.waterlines_z]
+                z_min_3d = float(np.interp(yc, col_m, hull.waterlines_z)) if np.max(col_m) >= yc else float(d_nom_3d * (0.10 + 0.75 * cut["frac"]))
+                
+                # Altura na popa
+                col_p = [hull.get_y(0, wz) for wz in hull.waterlines_z]
+                z_stern_3d = float(np.interp(yc, col_p, hull.waterlines_z)) if np.max(col_p) >= yc else float(min(d_nom_3d, z_min_3d + 0.30 + 0.40 * cut["frac"]))
+                
+                exp_b = 1.75 + 0.35 * cut["frac"]
+                exp_s = 1.80 + 0.20 * cut["frac"]
+                
+                pts_x_3d, pts_y_3d, pts_z_3d = [], [], []
+                for x in xs_dense_3d:
+                    if x >= x_mid_3d:
+                        t = (x - x_mid_3d) / (x_end_3d - x_mid_3d)
+                        z_val = z_min_3d + (d_nom_3d - z_min_3d) * (t ** exp_b)
+                    else:
+                        t = (x_mid_3d - x) / x_mid_3d
+                        z_val = z_min_3d + (z_stern_3d - z_min_3d) * (t ** exp_s)
+                    
+                    # Amostra Y exatamente na casca contínua do casco para ficar 100% rente/colado no casco
+                    y_val = float(hull.get_y_continuous(x, z_val))
+                    
+                    pts_x_3d.append(x)
+                    pts_y_3d.append(y_val)
+                    pts_z_3d.append(z_val)
 
                 # Boreste (+Y)
                 fig_3d.add_trace(go.Scatter3d(
-                    x=xs_cut_3d, y=ys_cut_3d, z=zs_cut_3d,
+                    x=pts_x_3d, y=pts_y_3d, z=pts_z_3d,
                     mode='lines', line=dict(color=cut["color"], width=5.5),
                     name=f"3D: {cut['name']}"
                 ))
                 # Bombordo (-Y)
                 fig_3d.add_trace(go.Scatter3d(
-                    x=xs_cut_3d, y=[-y for y in ys_cut_3d], z=zs_cut_3d,
+                    x=pts_x_3d, y=[-y for y in pts_y_3d], z=pts_z_3d,
                     mode='lines', line=dict(color=cut["color"], width=5.5),
                     showlegend=False
                 ))
