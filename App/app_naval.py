@@ -1210,60 +1210,64 @@ else:
             x_end = float(xs[-1])
             D_nom = float(hull.D)
 
-            # Grade de varredura: 150 posições em X e 80 alturas em Z
-            xs_scan = np.linspace(x0, x_end, 150)
-            zs_scan = np.linspace(0.0, D_nom, 80)
+            # Grade de varredura fina
+            xs_scan = np.linspace(x0, x_end, 180)
+            zs_scan = np.linspace(0.0, D_nom, 100)
 
             # 1. Grid de Referência
             for j, st_x in enumerate(xs):
                 fig.add_vline(
-                    x=st_x, line_dash="solid", line_color="rgba(239, 68, 68, 0.45)", line_width=1.2,
+                    x=st_x, line_dash="solid", line_color="rgba(239, 68, 68, 0.40)", line_width=1.2,
                     annotation_text=f"ST {j:02d}", annotation_position="top"
                 )
             for k, wz in enumerate(zs):
                 fig.add_hline(
-                    y=wz, line_dash="solid", line_color="rgba(59, 130, 246, 0.35)", line_width=1.0,
+                    y=wz, line_dash="solid", line_color="rgba(59, 130, 246, 0.30)", line_width=1.0,
                     annotation_text=f"WL {k:02d}" if k > 0 else "LB", annotation_position="left"
                 )
 
-            # 2. Quilha & Roda de Proa
-            # Regra física: a quilha de uma embarcação com quilha em V fica em Z=0 (linha de base)
-            # ao longo de todo o comprimento até onde a roda de proa começa a subir.
-            # A detecção usa: se a embarcação tem largura em QUALQUER altura Z neste X → quilha em Z=0.
-            # Só não fica em Z=0 quando o casco não existe nem na primeira WL positiva (bico da proa).
-            keel_x, keel_z = [], []
-            for x in xs_scan:
-                # Verifica se o casco existe neste X (alguma Y > 0 em qualquer Z)
-                y_at_top  = hull.get_y_continuous(x, D_nom)
-                y_at_mid  = hull.get_y_continuous(x, D_nom * 0.5)
-                if y_at_top < 0.002 and y_at_mid < 0.002:
-                    continue  # Fora do casco (além do bico de proa)
-
-                # O casco em V tem quilha em Z=0 — só a roda de proa sobe
-                # Detecta roda de proa: quando Y(X, WL01) ainda é zero mas Y(X, D*0.5) > 0
-                y_at_wl01 = hull.get_y_continuous(x, zs[1] if len(zs) > 1 else D_nom * 0.1)
-                y_at_wl02 = hull.get_y_continuous(x, zs[2] if len(zs) > 2 else D_nom * 0.2)
-
-                if y_at_wl01 < 0.002 and y_at_wl02 < 0.002:
-                    # Roda de proa: casco começa a existir apenas em WLs mais altas
-                    # Encontra a primeira WL com Y positivo
-                    y_profile = np.array([hull.get_y_continuous(x, z) for z in zs_scan])
-                    pos = np.where(y_profile > 0.002)[0]
-                    z_keel = float(zs_scan[pos[0]]) if len(pos) > 0 else 0.0
+            # 2. Roda de Proa & Quilha (Curva contínua que sobe suavemente até o bico do convés em x_end, D_nom)
+            stem_pts_x = [x0, float(xs[len(xs)//2])]
+            stem_pts_z = [0.0, 0.0]
+            
+            # Para cada WL, encontra a posição X onde a roda de proa passa
+            for k in range(1, len(zs)):
+                row_k = [hull.get_y(j, zs[k]) for j in range(len(xs))]
+                pos_idx = np.where(np.array(row_k) > 0.001)[0]
+                if len(pos_idx) > 0 and pos_idx[-1] < len(xs) - 1:
+                    li = pos_idx[-1]
+                    ya, yb = row_k[li], row_k[li + 1]
+                    x_stem_k = float(xs[li] + (xs[li + 1] - xs[li]) * (ya / (ya - yb + 1e-9)))
                 else:
-                    # Corpo do casco: quilha em Z=0
-                    z_keel = 0.0
+                    x_stem_k = x_end
+                stem_pts_x.append(x_stem_k)
+                stem_pts_z.append(float(zs[k]))
+            
+            # Garante que o topo da roda de proa toca exatamente o vértice do convés (x_end, D_nom)
+            stem_pts_x.append(x_end)
+            stem_pts_z.append(D_nom)
+            
+            # Ordena e remove duplicatas para interpolação suave
+            stem_pts_x = np.array(stem_pts_x)
+            stem_pts_z = np.array(stem_pts_z)
+            s_idx = np.argsort(stem_pts_x)
+            stem_pts_x, stem_pts_z = stem_pts_x[s_idx], stem_pts_z[s_idx]
+            _, u_idx = np.unique(stem_pts_x, return_index=True)
+            stem_pts_x, stem_pts_z = stem_pts_x[u_idx], stem_pts_z[u_idx]
+            
+            if len(stem_pts_x) >= 3:
+                pchip_stem = PchipInterpolator(stem_pts_x, stem_pts_z)
+                keel_x_dense = np.linspace(stem_pts_x[0], stem_pts_x[-1], 150)
+                keel_z_dense = np.maximum(0.0, np.minimum(D_nom, pchip_stem(keel_x_dense)))
+            else:
+                keel_x_dense = stem_pts_x
+                keel_z_dense = stem_pts_z
 
-                keel_x.append(x)
-                keel_z.append(z_keel)
+            z_deck_dense = np.full_like(keel_x_dense, D_nom)
 
-            keel_x = np.array(keel_x)
-            keel_z = np.array(keel_z)
-            z_deck = np.full_like(keel_x, D_nom)
-
-            # 3. Silhueta do Casco
-            sil_x = np.concatenate([keel_x, keel_x[::-1]])
-            sil_z = np.concatenate([keel_z, z_deck[::-1]])
+            # 3. Silhueta Lateral do Casco (Preenchimento)
+            sil_x = np.concatenate([keel_x_dense, keel_x_dense[::-1]])
+            sil_z = np.concatenate([keel_z_dense, z_deck_dense[::-1]])
             fig.add_trace(go.Scatter(
                 x=sil_x, y=sil_z, mode='lines',
                 fill='toself', fillcolor='rgba(59, 130, 246, 0.10)',
@@ -1271,29 +1275,28 @@ else:
                 line=dict(color="#fca311", width=3.0)
             ))
 
-            # 4. Espelho de Popa
+            # 4. Espelho de Popa (PR em X=0)
             fig.add_trace(go.Scatter(
                 x=[x0, x0], y=[0.0, D_nom], mode='lines',
                 name="Espelho de Popa (PR)",
                 line=dict(color="#fca311", width=3.0)
             ))
 
-            # 5. Quilha & Roda de Proa (linha branca)
+            # 5. Linha da Quilha & Roda de Proa (Linha Branca Contínua subindo até o convés)
             fig.add_trace(go.Scatter(
-                x=keel_x, y=keel_z, mode='lines',
+                x=keel_x_dense, y=keel_z_dense, mode='lines',
                 name="Perfil da Quilha & Roda de Proa (Y=0)",
                 line=dict(color="#ffffff", width=3.2)
             ))
 
-            # 6. Linhas do Alto (Cortes A, B, C) — varredura contínua 2D
-            # Análogo invertido do Plano de Balizas:
-            # Balizas: X fixo, varia Z, lê Y(X,Z)
-            # Linhas do Alto: Y fixo, varia X, encontra Z onde Y(X,Z)=Yc
+            # 6. Linhas do Alto (Cortes A, B, C subindo suavemente ao convés na proa)
             cuts_specs = [
                 {"name": "Corte A (Y = 1/6 B)", "y": hull.B * 0.1667, "color": "#f43f5e"},
                 {"name": "Corte B (Y = 1/3 B)", "y": hull.B * 0.3333, "color": "#fb923c"},
                 {"name": "Corte C (Y = 1/2 B)", "y": hull.B * 0.4900, "color": "#38bdf8"}
             ]
+
+            deck_row = [hull.get_y(j, D_nom) for j in range(len(xs))]
 
             for cut in cuts_specs:
                 yc = cut["y"]
@@ -1307,9 +1310,25 @@ else:
                     pts_x.append(x)
                     pts_z.append(z_found)
 
+                # Fecha suavemente no convés à proa se a curva termina abaixo de D
+                if len(pts_x) >= 2 and pts_z[-1] < D_nom - 0.05:
+                    for j in range(len(xs) - 1, -1, -1):
+                        if deck_row[j] >= yc:
+                            if j + 1 < len(xs):
+                                x_term = float(np.interp(yc, [deck_row[j+1], deck_row[j]], [xs[j+1], xs[j]]))
+                            else:
+                                x_term = float(xs[j])
+                            if x_term > pts_x[-1]:
+                                pts_x.append(x_term)
+                                pts_z.append(D_nom)
+                            break
+
                 if len(pts_x) >= 2:
+                    pchip_c = PchipInterpolator(pts_x, pts_z)
+                    xc_dense = np.linspace(pts_x[0], pts_x[-1], 100)
+                    zc_dense = pchip_c(xc_dense)
                     fig.add_trace(go.Scatter(
-                        x=pts_x, y=pts_z, mode='lines',
+                        x=xc_dense, y=zc_dense, mode='lines',
                         name=f"Linha do Alto {cut['name']}",
                         line=dict(color=cut["color"], width=2.6)
                     ))
@@ -1568,29 +1587,45 @@ else:
                     showlegend=False
                 ))
 
-        # 3. Quilha e Roda de Proa em 3D (Y = 0)
-        keel_3d_x, keel_3d_z = [], []
-        for x in xs_dense_3d:
-            y_top = hull.get_y_continuous(x, hull.D)
-            y_mid = hull.get_y_continuous(x, hull.D * 0.5)
-            if y_top < 0.002 and y_mid < 0.002: continue
-            y_wl1 = hull.get_y_continuous(x, hull.waterlines_z[1] if len(hull.waterlines_z)>1 else hull.D*0.1)
-            y_wl2 = hull.get_y_continuous(x, hull.waterlines_z[2] if len(hull.waterlines_z)>2 else hull.D*0.2)
-            if y_wl1 < 0.002 and y_wl2 < 0.002:
-                yp = np.array([hull.get_y_continuous(x, z) for z in zs_dense_3d])
-                pos = np.where(yp > 0.002)[0]
-                zk = float(zs_dense_3d[pos[0]]) if len(pos) > 0 else 0.0
+        # 3. Quilha e Roda de Proa em 3D (Y = 0 — sobe continuamente até o bico do convés em x_end, D)
+        keel_stem_3d_x = [float(hull.stations_x[0]), float(hull.stations_x[len(hull.stations_x)//2])]
+        keel_stem_3d_z = [0.0, 0.0]
+        
+        for k in range(1, len(hull.waterlines_z)):
+            row_k = [hull.get_y(j, hull.waterlines_z[k]) for j in range(len(hull.stations_x))]
+            pos_idx = np.where(np.array(row_k) > 0.001)[0]
+            if len(pos_idx) > 0 and pos_idx[-1] < len(hull.stations_x) - 1:
+                li = pos_idx[-1]
+                ya, yb = row_k[li], row_k[li + 1]
+                xk = float(hull.stations_x[li] + (hull.stations_x[li + 1] - hull.stations_x[li]) * (ya / (ya - yb + 1e-9)))
             else:
-                zk = 0.0
-            keel_3d_x.append(x)
-            keel_3d_z.append(zk)
+                xk = float(hull.stations_x[-1])
+            keel_stem_3d_x.append(xk)
+            keel_stem_3d_z.append(float(hull.waterlines_z[k]))
+            
+        keel_stem_3d_x.append(float(hull.stations_x[-1]))
+        keel_stem_3d_z.append(float(hull.D))
+        
+        keel_stem_3d_x = np.array(keel_stem_3d_x)
+        keel_stem_3d_z = np.array(keel_stem_3d_z)
+        s_i = np.argsort(keel_stem_3d_x)
+        keel_stem_3d_x, keel_stem_3d_z = keel_stem_3d_x[s_i], keel_stem_3d_z[s_i]
+        _, u_i = np.unique(keel_stem_3d_x, return_index=True)
+        keel_stem_3d_x, keel_stem_3d_z = keel_stem_3d_x[u_i], keel_stem_3d_z[u_i]
+        
+        if len(keel_stem_3d_x) >= 3:
+            pchip_stem_3d = PchipInterpolator(keel_stem_3d_x, keel_stem_3d_z)
+            k3d_x = np.linspace(keel_stem_3d_x[0], keel_stem_3d_x[-1], 100)
+            k3d_z = np.maximum(0.0, np.minimum(float(hull.D), pchip_stem_3d(k3d_x)))
+        else:
+            k3d_x = keel_stem_3d_x
+            k3d_z = keel_stem_3d_z
 
-        if len(keel_3d_x) >= 2:
-            fig_3d.add_trace(go.Scatter3d(
-                x=keel_3d_x, y=[0.0]*len(keel_3d_x), z=keel_3d_z,
-                mode='lines', line=dict(color="#ffffff", width=6.0),
-                name="3D: Quilha & Roda de Proa (Y=0)"
-            ))
+        fig_3d.add_trace(go.Scatter3d(
+            x=k3d_x, y=[0.0]*len(k3d_x), z=k3d_z,
+            mode='lines', line=dict(color="#ffffff", width=7.0),
+            name="3D: Roda de Proa & Quilha (Y=0)"
+        ))
 
         # Plano da Água Flutuante
         xp, yp = np.meshgrid(np.linspace(hull.stations_x[0], hull.stations_x[-1], 8), np.linspace(-hull.B/2, hull.B/2, 8))
