@@ -1289,11 +1289,11 @@ else:
 
             # 6. Linhas do Alto (Cortes Longitudinais Suaves até o Ápice da Proa, 100% Casados com o Casco)
             cuts_specs = [
-                {"name": "Corte I (Y = 0.18 B)", "frac": 0.18, "color": "#f43f5e"},
-                {"name": "Corte II (Y = 0.36 B)", "frac": 0.36, "color": "#fb923c"},
-                {"name": "Corte III (Y = 0.54 B)", "frac": 0.54, "color": "#facc15"},
-                {"name": "Corte IV (Y = 0.72 B)", "frac": 0.72, "color": "#22c55e"},
-                {"name": "Corte V (Y = 0.90 B)", "frac": 0.90, "color": "#38bdf8"}
+                {"name": "Corte I (Y = 0.15 B)", "frac": 0.15, "exp_bow": 3.20, "exp_stern": 1.90, "color": "#f43f5e"},
+                {"name": "Corte II (Y = 0.32 B)", "frac": 0.32, "exp_bow": 2.60, "exp_stern": 1.85, "color": "#fb923c"},
+                {"name": "Corte III (Y = 0.50 B)", "frac": 0.50, "exp_bow": 2.10, "exp_stern": 1.80, "color": "#facc15"},
+                {"name": "Corte IV (Y = 0.70 B)", "frac": 0.70, "exp_bow": 1.65, "exp_stern": 1.75, "color": "#22c55e"},
+                {"name": "Corte V (Y = 0.88 B)", "frac": 0.88, "exp_bow": 1.30, "exp_stern": 1.70, "color": "#38bdf8"}
             ]
 
             x_mid = float(xs[len(xs) // 2])
@@ -1310,9 +1310,9 @@ else:
                 col_0 = [hull.get_y(0, wz) for wz in zs]
                 z_stern = float(np.interp(yc, col_0, zs)) if np.max(col_0) >= yc else float(min(D_nom, z_min + 0.30 + 0.40 * cut["frac"]))
 
-                # 3. Traçado contínuo suave: da meia-nau curva em arco contínuo até o ápice da proa (X_end, D_nom)
-                exp_bow = 1.75 + 0.35 * cut["frac"]
-                exp_stern = 1.80 + 0.20 * cut["frac"]
+                # 3. Traçado contínuo suave: descida e abertura ampla cobrindo todo o costado e bojo da proa
+                exp_bow = cut["exp_bow"]
+                exp_stern = cut["exp_stern"]
 
                 zs_cut = []
                 for x in xs_dense:
@@ -1397,11 +1397,11 @@ else:
         # 1. Linhas do Alto e Quilha em 3D (Opcionais via Toggle do Usuário)
         if show_3d_buttocks:
             cuts_specs_3d = [
-                {"name": "Corte I (Y = 0.18 B)", "frac": 0.18, "color": "#f43f5e"},
-                {"name": "Corte II (Y = 0.36 B)", "frac": 0.36, "color": "#fb923c"},
-                {"name": "Corte III (Y = 0.54 B)", "frac": 0.54, "color": "#facc15"},
-                {"name": "Corte IV (Y = 0.72 B)", "frac": 0.72, "color": "#22c55e"},
-                {"name": "Corte V (Y = 0.90 B)", "frac": 0.90, "color": "#38bdf8"}
+                {"name": "Corte I (Y = 0.15 B)", "frac": 0.15, "exp_bow": 3.20, "exp_stern": 1.90, "color": "#f43f5e"},
+                {"name": "Corte II (Y = 0.32 B)", "frac": 0.32, "exp_bow": 2.60, "exp_stern": 1.85, "color": "#fb923c"},
+                {"name": "Corte III (Y = 0.50 B)", "frac": 0.50, "exp_bow": 2.10, "exp_stern": 1.80, "color": "#facc15"},
+                {"name": "Corte IV (Y = 0.70 B)", "frac": 0.70, "exp_bow": 1.65, "exp_stern": 1.75, "color": "#22c55e"},
+                {"name": "Corte V (Y = 0.88 B)", "frac": 0.88, "exp_bow": 1.30, "exp_stern": 1.70, "color": "#38bdf8"}
             ]
 
             for cut in cuts_specs_3d:
@@ -1415,8 +1415,8 @@ else:
                 col_p = [hull.get_y(0, wz) for wz in hull.waterlines_z]
                 z_stern_3d = float(np.interp(yc, col_p, hull.waterlines_z)) if np.max(col_p) >= yc else float(min(d_nom_3d, z_min_3d + 0.30 + 0.40 * cut["frac"]))
                 
-                exp_b = 1.75 + 0.35 * cut["frac"]
-                exp_s = 1.80 + 0.20 * cut["frac"]
+                exp_b = cut["exp_bow"]
+                exp_s = cut["exp_stern"]
                 
                 pts_x_3d, pts_y_3d, pts_z_3d = [], [], []
                 for x in xs_dense_3d:
