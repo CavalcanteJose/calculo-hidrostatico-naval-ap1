@@ -1061,11 +1061,9 @@ else:
             view_2d_choice = st.radio(
                 "🧭 Selecione a Vista 2D para Exibição:",
                 [
-                    "🚢 Vista Lateral (Perfil do Casco — Linhas d'Água na lateral)",
-                    "📐 Plano de Linhas do Alto (Sheer / Buttocks - Lateral Inteira)",
+                    "📐 Plano de Linhas do Alto (Sheer / Buttock Plan)",
                     "⚓ Plano de Balizas (Body Plan - Vante/Ré)",
-                    "🌊 Plano de Linhas d'Água (Half-Breadth Plan)",
-                    "📑 Vista Completa (Tríptico Naval Unificado)"
+                    "🌊 Plano de Linhas d'Água (Half-Breadth Plan)"
                 ],
                 horizontal=True
             )
@@ -1361,149 +1359,15 @@ else:
             )
             return fig
 
-        # ---------------------------------------------------------------
-        # VISTA LATERAL — PERFIL DO CASCO COM LINHAS D'ÁGUA NA LATERAL
-        # ---------------------------------------------------------------
-        def get_lateral_profile_figure():
-            """Vista lateral real da embarcação:
-            - Mostra o contorno externo do casco visto de lado (quilha, roda de proa, convés, espelho)
-            - Para cada WL em altura Z_k, traça o segmento horizontal de X_ré a X_vante
-              onde o casco existe — mostrando até onde cada linha d'água se estende na lateral
-            - Exatamente como seria visto de fora da embarcação, de lado
-            """
-            fig = go.Figure()
-            xs = hull.stations_x
-            zs = hull.waterlines_z
-            x0 = float(xs[0])
-            x_end = float(xs[-1])
-            D_nom = float(hull.D)
-            xs_scan = np.linspace(x0, x_end, 200)
-
-            # --- 1. Grid de referência (estações em vermelho) ---
-            for j, st_x in enumerate(xs):
-                fig.add_vline(
-                    x=st_x, line_dash="solid",
-                    line_color="rgba(239, 68, 68, 0.35)", line_width=1.0,
-                    annotation_text=f"ST {j:02d}", annotation_position="top"
-                )
-
-            # --- 2. Contorno lateral do casco ---
-            # Quilha: Z=0 no corpo; roda de proa: primeiro Z positivo
-            keel_x, keel_z = [], []
-            for x in xs_scan:
-                y_top = hull.get_y_continuous(x, D_nom)
-                y_mid = hull.get_y_continuous(x, D_nom * 0.4)
-                if y_top < 0.002 and y_mid < 0.002:
-                    continue
-                y_wl1 = hull.get_y_continuous(x, zs[1] if len(zs) > 1 else D_nom * 0.1)
-                y_wl2 = hull.get_y_continuous(x, zs[2] if len(zs) > 2 else D_nom * 0.2)
-                if y_wl1 < 0.002 and y_wl2 < 0.002:
-                    zs_s = np.linspace(0, D_nom, 60)
-                    yp = np.array([hull.get_y_continuous(x, z) for z in zs_s])
-                    pos = np.where(yp > 0.002)[0]
-                    z_keel = float(zs_s[pos[0]]) if len(pos) > 0 else 0.0
-                else:
-                    z_keel = 0.0
-                keel_x.append(x)
-                keel_z.append(z_keel)
-
-            keel_x = np.array(keel_x)
-            keel_z = np.array(keel_z)
-            z_deck = np.full_like(keel_x, D_nom)
-
-            # Silhueta preenchida
-            sil_x = np.concatenate([keel_x, keel_x[::-1]])
-            sil_z = np.concatenate([keel_z, z_deck[::-1]])
-            fig.add_trace(go.Scatter(
-                x=sil_x, y=sil_z, mode='lines',
-                fill='toself', fillcolor='rgba(59, 130, 246, 0.08)',
-                name="Contorno Lateral do Casco",
-                line=dict(color="#fca311", width=3.0)
-            ))
-            # Espelho de popa
-            fig.add_trace(go.Scatter(
-                x=[x0, x0], y=[0.0, D_nom], mode='lines',
-                name="Espelho de Popa",
-                line=dict(color="#fca311", width=3.0), showlegend=False
-            ))
-            # Quilha & roda de proa (linha branca)
-            fig.add_trace(go.Scatter(
-                x=keel_x, y=keel_z, mode='lines',
-                name="Quilha & Roda de Proa",
-                line=dict(color="#ffffff", width=2.8)
-            ))
-
-            # --- 3. Linhas d'Água projetadas na vista lateral ---
-            # Para cada WL (Z_k fixo): varre X e encontra o trecho contínuo
-            # onde o casco existe (Y>0). Desenha o segmento de X_ré a X_vante.
-            wl_colors = [
-                "#ef4444", "#f97316", "#eab308", "#22c55e",
-                "#06b6d4", "#6366f1", "#a855f7", "#ec4899",
-                "#94a3b8", "#ffffff", "#fca311"
-            ]
-            for k, wl_z in enumerate(zs):
-                if wl_z == 0.0:
-                    continue  # Linha de base já é o contorno
-
-                # Varre X e acha onde Y > 0
-                seg_x, in_hull, x_start = [], False, None
-                for x in xs_scan:
-                    y = hull.get_y_continuous(x, wl_z)
-                    if y > 0.002 and not in_hull:
-                        x_start = x
-                        in_hull = True
-                    elif y <= 0.002 and in_hull:
-                        seg_x.append((x_start, x))
-                        in_hull = False
-                if in_hull:
-                    seg_x.append((x_start, xs_scan[-1]))
-
-                color = wl_colors[k % len(wl_colors)]
-                for i, (xs_seg, xe_seg) in enumerate(seg_x):
-                    fig.add_trace(go.Scatter(
-                        x=[xs_seg, xe_seg], y=[wl_z, wl_z], mode='lines',
-                        name=f"WL {k:02d} (Z={wl_z:.2f}m)" if i == 0 else None,
-                        showlegend=(i == 0),
-                        line=dict(color=color, width=2.0)
-                    ))
-
-            # --- 4. Calado de análise ---
-            fig.add_hline(
-                y=viz_draft, line_dash="dash", line_color="#00f5d4", line_width=2.5,
-                annotation_text=f"Calado T = {viz_draft:.2f}m", annotation_position="bottom right"
-            )
-
-            fig.update_layout(
-                title="Vista Lateral da Embarcação (Perfil com Linhas d'Água projetadas na lateral)",
-                xaxis_title="Comprimento X (m) — PR (Popa) → PV (Proa)",
-                yaxis_title="Altura Z (m) — Linha de Base (LB) = 0",
-                yaxis=dict(range=[-0.05, D_nom + 0.15]),
-                template="plotly_dark", height=520,
-                margin=dict(l=25, r=25, t=45, b=25),
-                legend=dict(orientation="h", yanchor="bottom", y=-0.48, xanchor="center", x=0.5)
-            )
-            return fig
-
         # ----------------------------------------------------------------------
         # EXIBIÇÃO NO PAINEL PRINCIPAL (LARGURA TOTAL 100% PARA O PLANO DE LINHAS)
         # ----------------------------------------------------------------------
         st.markdown("#### 📐 Projeções Bidimensionais (Plano de Linhas)")
-        if view_2d_choice == "🚢 Vista Lateral (Perfil do Casco — Linhas d'Água na lateral)":
-            st.plotly_chart(get_lateral_profile_figure(), use_container_width=True)
-        elif view_2d_choice == "📐 Plano de Linhas do Alto (Sheer / Buttocks - Lateral Inteira)":
+        if view_2d_choice == "📐 Plano de Linhas do Alto (Sheer / Buttock Plan)":
             st.plotly_chart(get_sheer_figure(), use_container_width=True)
         elif view_2d_choice == "⚓ Plano de Balizas (Body Plan - Vante/Ré)":
             st.plotly_chart(get_body_plan_figure(), use_container_width=True)
         elif view_2d_choice == "🌊 Plano de Linhas d'Água (Half-Breadth Plan)":
-            st.plotly_chart(get_waterlines_figure(), use_container_width=True)
-        else:
-            st.markdown("##### 1. Vista Lateral (Perfil do Casco)")
-            st.plotly_chart(get_lateral_profile_figure(), use_container_width=True)
-            st.markdown("##### 2. Plano de Linhas do Alto (Sheer / Buttocks)")
-            st.plotly_chart(get_sheer_figure(), use_container_width=True)
-            st.markdown("##### 3. Plano de Balizas (Body Plan)")
-            st.plotly_chart(get_body_plan_figure(), use_container_width=True)
-            st.markdown("##### 4. Plano de Linhas d'Água (Half-Breadth Plan)")
             st.plotly_chart(get_waterlines_figure(), use_container_width=True)
 
         st.divider()
@@ -1511,10 +1375,7 @@ else:
         # ----------------------------------------------------------------------
         # CASCO 3D (EM CONTAINER COMPLETO ABAIXO DO PLANO 2D)
         # ----------------------------------------------------------------------
-        # ----------------------------------------------------------------------
-        # CASCO 3D (EM CONTAINER COMPLETO ABAIXO DO PLANO 2D)
-        # ----------------------------------------------------------------------
-        st.markdown("#### 🌐 Casco Tridimensional (3D Mesh Suave + 10 Linhas d'Água & Cortes)")
+        st.markdown("#### 🌐 Casco Tridimensional (3D Mesh Suave + Cortes do Plano de Linhas)")
         xs_3d = np.linspace(hull.stations_x[0], hull.stations_x[-1], 50)
         zs_3d = np.linspace(hull.waterlines_z[0], hull.D, 35)
         
