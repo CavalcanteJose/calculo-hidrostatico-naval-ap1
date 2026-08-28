@@ -1480,9 +1480,12 @@ else:
         # ----------------------------------------------------------------------
         # CASCO 3D (EM CONTAINER COMPLETO ABAIXO DO PLANO 2D)
         # ----------------------------------------------------------------------
-        st.markdown("#### 🌐 Casco Tridimensional (3D Mesh Suave + Fatias dos Planos Navais)")
-        xs_3d = np.linspace(hull.stations_x[0], hull.stations_x[-1], 45)
-        zs_3d = np.linspace(hull.waterlines_z[0], hull.D, 30)
+        # ----------------------------------------------------------------------
+        # CASCO 3D (EM CONTAINER COMPLETO ABAIXO DO PLANO 2D)
+        # ----------------------------------------------------------------------
+        st.markdown("#### 🌐 Casco Tridimensional (3D Mesh Suave + 10 Linhas d'Água & Cortes)")
+        xs_3d = np.linspace(hull.stations_x[0], hull.stations_x[-1], 50)
+        zs_3d = np.linspace(hull.waterlines_z[0], hull.D, 35)
         
         x_mesh, z_mesh = np.meshgrid(xs_3d, zs_3d)
         y_mesh = np.zeros_like(x_mesh)
@@ -1493,17 +1496,53 @@ else:
             
         fig_3d = go.Figure()
         # Casco translúcido
-        fig_3d.add_trace(go.Surface(x=x_mesh, y=y_mesh, z=z_mesh, colorscale='Viridis', opacity=0.75, showscale=False, name="Boreste (+Y)"))
-        fig_3d.add_trace(go.Surface(x=x_mesh, y=-y_mesh, z=z_mesh, colorscale='Viridis', opacity=0.75, showscale=False, name="Bombordo (-Y)"))
+        fig_3d.add_trace(go.Surface(x=x_mesh, y=y_mesh, z=z_mesh, colorscale='Viridis', opacity=0.70, showscale=False, name="Boreste (+Y)"))
+        fig_3d.add_trace(go.Surface(x=x_mesh, y=-y_mesh, z=z_mesh, colorscale='Viridis', opacity=0.70, showscale=False, name="Bombordo (-Y)"))
         
-        # 1. Traçar as Linhas do Alto em 3D sobre o Casco (Cortes Y = constante)
-        cuts_specs_3d = [
-            {"name": "Corte A (Y = 1/6 B)", "y": hull.B * 0.1667, "color": "#f43f5e"},
-            {"name": "Corte B (Y = 1/3 B)", "y": hull.B * 0.3333, "color": "#fb923c"},
-            {"name": "Corte C (Y = 1/2 B)", "y": hull.B * 0.4900, "color": "#38bdf8"}
+        xs_dense_3d = np.linspace(hull.stations_x[0], hull.stations_x[-1], 120)
+        
+        # 1. Traçar as 10 Linhas d'Água em 3D sobre o Casco (WL 01 a WL 10)
+        # Cada uma começa em X=0 (Popa) e vai até o ponto de término na Roda de Proa (X=9.11m)
+        wl_palette_3d = [
+            "#ef4444", "#f97316", "#f59e0b", "#eab308", "#84cc16",
+            "#10b981", "#06b6d4", "#3b82f6", "#8b5cf6", "#ec4899"
         ]
-        xs_dense_3d = np.linspace(hull.stations_x[0], hull.stations_x[-1], 80)
-        zs_dense_3d = np.linspace(0.0, hull.D, 50)
+        
+        for k in range(1, len(hull.waterlines_z)):
+            wz = float(hull.waterlines_z[k])
+            pts_x_wl, pts_y_wl = [], []
+            for x in xs_dense_3d:
+                y_val = hull.get_y_continuous(x, wz)
+                if y_val > 0.001:
+                    pts_x_wl.append(x)
+                    pts_y_wl.append(y_val)
+                elif len(pts_x_wl) > 0:
+                    pts_x_wl.append(x)
+                    pts_y_wl.append(0.0)
+                    break
+            
+            if len(pts_x_wl) >= 2:
+                col = wl_palette_3d[(k-1) % len(wl_palette_3d)]
+                # Boreste (+Y)
+                fig_3d.add_trace(go.Scatter3d(
+                    x=pts_x_wl, y=pts_y_wl, z=[wz]*len(pts_x_wl),
+                    mode='lines', line=dict(color=col, width=4.5),
+                    name=f"3D: WL {k:02d} (Z={wz:.2f}m)"
+                ))
+                # Bombordo (-Y)
+                fig_3d.add_trace(go.Scatter3d(
+                    x=pts_x_wl, y=[-y for y in pts_y_wl], z=[wz]*len(pts_x_wl),
+                    mode='lines', line=dict(color=col, width=4.5),
+                    showlegend=False
+                ))
+
+        # 2. Linhas do Alto em 3D (Cortes Longitudinais Y = constante)
+        cuts_specs_3d = [
+            {"name": "Corte A (Y = 1/6 B)", "y": hull.B * 0.1667, "color": "#ff0055"},
+            {"name": "Corte B (Y = 1/3 B)", "y": hull.B * 0.3333, "color": "#ffaa00"},
+            {"name": "Corte C (Y = 1/2 B)", "y": hull.B * 0.4900, "color": "#00ddff"}
+        ]
+        zs_dense_3d = np.linspace(0.0, hull.D, 60)
         
         for cut in cuts_specs_3d:
             yc = cut["y"]
@@ -1519,17 +1558,17 @@ else:
                 # Boreste (+Y)
                 fig_3d.add_trace(go.Scatter3d(
                     x=pts_x_3d, y=[yc]*len(pts_x_3d), z=pts_z_3d,
-                    mode='lines', line=dict(color=cut["color"], width=5.0),
+                    mode='lines', line=dict(color=cut["color"], width=5.0, dash='dash'),
                     name=f"3D: {cut['name']}"
                 ))
                 # Bombordo (-Y)
                 fig_3d.add_trace(go.Scatter3d(
                     x=pts_x_3d, y=[-yc]*len(pts_x_3d), z=pts_z_3d,
-                    mode='lines', line=dict(color=cut["color"], width=5.0),
+                    mode='lines', line=dict(color=cut["color"], width=5.0, dash='dash'),
                     showlegend=False
                 ))
 
-        # 2. Quilha e Roda de Proa em 3D (Y = 0)
+        # 3. Quilha e Roda de Proa em 3D (Y = 0)
         keel_3d_x, keel_3d_z = [], []
         for x in xs_dense_3d:
             y_top = hull.get_y_continuous(x, hull.D)
@@ -1563,14 +1602,14 @@ else:
         ))
         
         fig_3d.update_layout(
-            title=f"Casco 3D Integrado com Cortes do Plano de Linhas: {st.session_state.ship_name}",
+            title=f"Casco 3D Integrado com as 10 Linhas d'Água e Cortes Navais: {st.session_state.ship_name}",
             scene=dict(
                 xaxis_title="X (m) [Longitudinal]",
                 yaxis_title="Y (m) [Transversal]",
                 zaxis_title="Z (m) [Vertical]",
                 aspectmode='data'
             ),
-            template="plotly_dark", height=540, margin=dict(l=10, r=10, t=40, b=10)
+            template="plotly_dark", height=560, margin=dict(l=10, r=10, t=40, b=10)
         )
         st.plotly_chart(fig_3d, use_container_width=True)
 
