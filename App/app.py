@@ -1289,7 +1289,7 @@ else:
                 line=dict(color="#ffffff", width=3.2)
             ))
 
-            # 6. Linhas do Alto (Cortes Longitudinais partindo do vértice da proa X=9.112, Z=1.80)
+            # 6. Linhas do Alto (Cortes Longitudinais com curvas suaves de adoçamento naval)
             cuts_specs = [
                 {"name": "Corte I (Y = 0.10 B)", "y": hull.B * 0.10, "color": "#f43f5e"},
                 {"name": "Corte II (Y = 0.20 B)", "y": hull.B * 0.20, "color": "#fb923c"},
@@ -1298,65 +1298,56 @@ else:
                 {"name": "Corte V (Y = 0.48 B)", "y": hull.B * 0.48, "color": "#38bdf8"}
             ]
 
-            deck_row = [hull.get_y(j, D_nom) for j in range(len(xs))]
-
             for cut in cuts_specs:
                 yc = cut["y"]
-                pts_x, pts_z = [], []
+                raw_x, raw_z = [], []
 
                 for x in xs_scan:
                     y_profile = np.array([hull.get_y_continuous(x, z) for z in zs_scan])
                     if np.max(y_profile) < yc:
                         continue
                     z_found = float(np.interp(yc, y_profile, zs_scan))
-                    pts_x.append(x)
-                    pts_z.append(z_found)
+                    raw_x.append(x)
+                    raw_z.append(z_found)
 
-                if len(pts_x) >= 2:
-                    # 1. Conecta suavemente até o bico de proa (X = x_end, Z = D_nom)
-                    if pts_x[-1] < x_end:
-                        # Adiciona o ponto de transição no convés
-                        for j in range(len(xs) - 1, -1, -1):
-                            if deck_row[j] >= yc:
-                                if j + 1 < len(xs):
-                                    x_term = float(np.interp(yc, [deck_row[j+1], deck_row[j]], [xs[j+1], xs[j]]))
-                                else:
-                                    x_term = float(xs[j])
-                                if x_term > pts_x[-1] and x_term < x_end:
-                                    pts_x.append(x_term)
-                                    pts_z.append(D_nom)
-                                break
-                        # Vértice de Proa exato (X=x_end, Z=D_nom) onde todas as linhas convergem
-                        pts_x.append(x_end)
-                        pts_z.append(D_nom)
+                if len(raw_x) >= 2:
+                    # Amostra pontos âncora essenciais para manter a curvatura suave e contínua
+                    anchor_x = [x0]
+                    # Altura na popa
+                    col_0 = np.array([hull.get_y_continuous(x0, z) for z in zs_scan])
+                    z_stern = float(np.interp(yc, col_0, zs_scan)) if np.max(col_0) >= yc else D_nom
+                    anchor_z = [z_stern]
 
-                    # 2. Conecta na Popa (ST 00)
-                    if pts_x[0] > x0 and pts_z[0] < D_nom - 0.05:
-                        for j in range(len(xs)):
-                            if deck_row[j] >= yc:
-                                if j > 0:
-                                    x_start = float(np.interp(yc, [deck_row[j-1], deck_row[j]], [xs[j-1], xs[j]]))
-                                else:
-                                    x_start = float(xs[j])
-                                if x_start < pts_x[0] and x_start >= x0:
-                                    pts_x.insert(0, x_start)
-                                    pts_z.insert(0, D_nom)
-                                break
+                    # Seleciona pontos intermediários ao longo do casco
+                    step = max(1, len(raw_x) // 12)
+                    for idx in range(0, len(raw_x), step):
+                        if raw_x[idx] > x0 + 0.1 and raw_x[idx] < x_end - 0.2:
+                            anchor_x.append(raw_x[idx])
+                            anchor_z.append(raw_z[idx])
+                    
+                    if raw_x[-1] > anchor_x[-1] and raw_x[-1] < x_end - 0.2:
+                        anchor_x.append(raw_x[-1])
+                        anchor_z.append(raw_z[-1])
 
-                    # Ordena estritamente por X
-                    pts_x = np.array(pts_x)
-                    pts_z = np.array(pts_z)
-                    s_idx = np.argsort(pts_x)
-                    pts_x, pts_z = pts_x[s_idx], pts_z[s_idx]
-                    _, u_idx = np.unique(pts_x, return_index=True)
-                    pts_x, pts_z = pts_x[u_idx], pts_z[u_idx]
+                    # Ponto final no ápice da proa
+                    anchor_x.append(x_end)
+                    anchor_z.append(D_nom)
 
-                    if len(pts_x) >= 3:
-                        pchip_c = PchipInterpolator(pts_x, pts_z)
-                        xc_dense = np.linspace(pts_x[0], pts_x[-1], 120)
-                        zc_dense = np.maximum(0.0, np.minimum(D_nom, pchip_c(xc_dense)))
+                    # Deduplicação e ordenação
+                    anchor_x = np.array(anchor_x)
+                    anchor_z = np.array(anchor_z)
+                    s_idx = np.argsort(anchor_x)
+                    anchor_x, anchor_z = anchor_x[s_idx], anchor_z[s_idx]
+                    _, u_idx = np.unique(anchor_x, return_index=True)
+                    anchor_x, anchor_z = anchor_x[u_idx], anchor_z[u_idx]
+
+                    # Interpolação suave contínua (PCHIP sem oscilação ou quebras bruscas)
+                    if len(anchor_x) >= 3:
+                        pchip_cut = PchipInterpolator(anchor_x, anchor_z)
+                        xc_dense = np.linspace(anchor_x[0], anchor_x[-1], 150)
+                        zc_dense = np.maximum(0.0, np.minimum(D_nom, pchip_cut(xc_dense)))
                     else:
-                        xc_dense, zc_dense = pts_x, pts_z
+                        xc_dense, zc_dense = anchor_x, anchor_z
 
                     fig.add_trace(go.Scatter(
                         x=xc_dense, y=zc_dense, mode='lines',
@@ -1586,7 +1577,7 @@ else:
                     showlegend=False
                 ))
 
-        # 2. Linhas do Alto em 3D (Cortes Longitudinais partindo do ápice da proa X=9.112, Y=0, Z=1.80)
+        # 2. Linhas do Alto em 3D (Cortes Longitudinais com adoçamento suave partindo do ápice da proa)
         cuts_specs_3d = [
             {"name": "Corte I (Y = 0.10 B)", "y": hull.B * 0.10, "color": "#f43f5e"},
             {"name": "Corte II (Y = 0.20 B)", "y": hull.B * 0.20, "color": "#fb923c"},
@@ -1601,7 +1592,16 @@ else:
         for cut in cuts_specs_3d:
             yc = cut["y"]
             pts_x_3d, pts_y_3d, pts_z_3d = [], [], []
+            
+            # Altura na popa
+            col_0 = np.array([hull.get_y_continuous(0.0, z) for z in zs_dense_3d])
+            z_s = float(np.interp(yc, col_0, zs_dense_3d)) if np.max(col_0) >= yc else d_nom_3d
+            pts_x_3d.append(0.0)
+            pts_y_3d.append(yc)
+            pts_z_3d.append(z_s)
+
             for x in xs_dense_3d:
+                if x <= 0.05 or x >= x_end_3d - 0.15: continue
                 y_prof = np.array([hull.get_y_continuous(x, z) for z in zs_dense_3d])
                 if np.max(y_prof) >= yc:
                     zi = float(np.interp(yc, y_prof, zs_dense_3d))
@@ -1609,22 +1609,33 @@ else:
                     pts_y_3d.append(yc)
                     pts_z_3d.append(zi)
             
-            if len(pts_x_3d) >= 2:
-                # Conecta ao vértice superior da proa (x_end, 0, D_nom)
-                pts_x_3d.append(x_end_3d)
-                pts_y_3d.append(0.0)
-                pts_z_3d.append(d_nom_3d)
+            # Vértice superior da proa
+            pts_x_3d.append(x_end_3d)
+            pts_y_3d.append(0.0)
+            pts_z_3d.append(d_nom_3d)
+
+            if len(pts_x_3d) >= 3:
+                u_nodes = np.linspace(0, 1, len(pts_x_3d))
+                u_fine = np.linspace(0, 1, 100)
+                
+                spline_x = PchipInterpolator(u_nodes, pts_x_3d)
+                spline_y = PchipInterpolator(u_nodes, pts_y_3d)
+                spline_z = PchipInterpolator(u_nodes, pts_z_3d)
+                
+                x_3d_smooth = spline_x(u_fine)
+                y_3d_smooth = spline_y(u_fine)
+                z_3d_smooth = np.maximum(0.0, np.minimum(d_nom_3d, spline_z(u_fine)))
                 
                 # Boreste (+Y)
                 fig_3d.add_trace(go.Scatter3d(
-                    x=pts_x_3d, y=pts_y_3d, z=pts_z_3d,
-                    mode='lines', line=dict(color=cut["color"], width=5.0),
+                    x=x_3d_smooth, y=y_3d_smooth, z=z_3d_smooth,
+                    mode='lines', line=dict(color=cut["color"], width=4.5),
                     name=f"3D: {cut['name']}"
                 ))
                 # Bombordo (-Y)
                 fig_3d.add_trace(go.Scatter3d(
-                    x=pts_x_3d, y=[-y for y in pts_y_3d], z=pts_z_3d,
-                    mode='lines', line=dict(color=cut["color"], width=5.0),
+                    x=x_3d_smooth, y=-y_3d_smooth, z=z_3d_smooth,
+                    mode='lines', line=dict(color=cut["color"], width=4.5),
                     showlegend=False
                 ))
 
