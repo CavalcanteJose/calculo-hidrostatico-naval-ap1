@@ -1480,9 +1480,9 @@ else:
         # ----------------------------------------------------------------------
         # CASCO 3D (EM CONTAINER COMPLETO ABAIXO DO PLANO 2D)
         # ----------------------------------------------------------------------
-        st.markdown("#### 🌐 Casco Tridimensional (3D Mesh Suave)")
-        xs_3d = np.linspace(hull.stations_x[0], hull.stations_x[-1], 40)
-        zs_3d = np.linspace(hull.waterlines_z[0], hull.D, 25)
+        st.markdown("#### 🌐 Casco Tridimensional (3D Mesh Suave + Fatias dos Planos Navais)")
+        xs_3d = np.linspace(hull.stations_x[0], hull.stations_x[-1], 45)
+        zs_3d = np.linspace(hull.waterlines_z[0], hull.D, 30)
         
         x_mesh, z_mesh = np.meshgrid(xs_3d, zs_3d)
         y_mesh = np.zeros_like(x_mesh)
@@ -1492,9 +1492,67 @@ else:
                 y_mesh[r, c] = hull.get_y_continuous(x_mesh[r, c], z_mesh[r, c])
             
         fig_3d = go.Figure()
-        fig_3d.add_trace(go.Surface(x=x_mesh, y=y_mesh, z=z_mesh, colorscale='Viridis', opacity=0.88, showscale=False, name="Boreste (+Y)"))
-        fig_3d.add_trace(go.Surface(x=x_mesh, y=-y_mesh, z=z_mesh, colorscale='Viridis', opacity=0.88, showscale=False, name="Bombordo (-Y)"))
+        # Casco translúcido
+        fig_3d.add_trace(go.Surface(x=x_mesh, y=y_mesh, z=z_mesh, colorscale='Viridis', opacity=0.75, showscale=False, name="Boreste (+Y)"))
+        fig_3d.add_trace(go.Surface(x=x_mesh, y=-y_mesh, z=z_mesh, colorscale='Viridis', opacity=0.75, showscale=False, name="Bombordo (-Y)"))
         
+        # 1. Traçar as Linhas do Alto em 3D sobre o Casco (Cortes Y = constante)
+        cuts_specs_3d = [
+            {"name": "Corte A (Y = 1/6 B)", "y": hull.B * 0.1667, "color": "#f43f5e"},
+            {"name": "Corte B (Y = 1/3 B)", "y": hull.B * 0.3333, "color": "#fb923c"},
+            {"name": "Corte C (Y = 1/2 B)", "y": hull.B * 0.4900, "color": "#38bdf8"}
+        ]
+        xs_dense_3d = np.linspace(hull.stations_x[0], hull.stations_x[-1], 80)
+        zs_dense_3d = np.linspace(0.0, hull.D, 50)
+        
+        for cut in cuts_specs_3d:
+            yc = cut["y"]
+            pts_x_3d, pts_z_3d = [], []
+            for x in xs_dense_3d:
+                y_prof = np.array([hull.get_y_continuous(x, z) for z in zs_dense_3d])
+                if np.max(y_prof) >= yc:
+                    zi = float(np.interp(yc, y_prof, zs_dense_3d))
+                    pts_x_3d.append(x)
+                    pts_z_3d.append(zi)
+            
+            if len(pts_x_3d) >= 2:
+                # Boreste (+Y)
+                fig_3d.add_trace(go.Scatter3d(
+                    x=pts_x_3d, y=[yc]*len(pts_x_3d), z=pts_z_3d,
+                    mode='lines', line=dict(color=cut["color"], width=5.0),
+                    name=f"3D: {cut['name']}"
+                ))
+                # Bombordo (-Y)
+                fig_3d.add_trace(go.Scatter3d(
+                    x=pts_x_3d, y=[-yc]*len(pts_x_3d), z=pts_z_3d,
+                    mode='lines', line=dict(color=cut["color"], width=5.0),
+                    showlegend=False
+                ))
+
+        # 2. Quilha e Roda de Proa em 3D (Y = 0)
+        keel_3d_x, keel_3d_z = [], []
+        for x in xs_dense_3d:
+            y_top = hull.get_y_continuous(x, hull.D)
+            y_mid = hull.get_y_continuous(x, hull.D * 0.5)
+            if y_top < 0.002 and y_mid < 0.002: continue
+            y_wl1 = hull.get_y_continuous(x, hull.waterlines_z[1] if len(hull.waterlines_z)>1 else hull.D*0.1)
+            y_wl2 = hull.get_y_continuous(x, hull.waterlines_z[2] if len(hull.waterlines_z)>2 else hull.D*0.2)
+            if y_wl1 < 0.002 and y_wl2 < 0.002:
+                yp = np.array([hull.get_y_continuous(x, z) for z in zs_dense_3d])
+                pos = np.where(yp > 0.002)[0]
+                zk = float(zs_dense_3d[pos[0]]) if len(pos) > 0 else 0.0
+            else:
+                zk = 0.0
+            keel_3d_x.append(x)
+            keel_3d_z.append(zk)
+
+        if len(keel_3d_x) >= 2:
+            fig_3d.add_trace(go.Scatter3d(
+                x=keel_3d_x, y=[0.0]*len(keel_3d_x), z=keel_3d_z,
+                mode='lines', line=dict(color="#ffffff", width=6.0),
+                name="3D: Quilha & Roda de Proa (Y=0)"
+            ))
+
         # Plano da Água Flutuante
         xp, yp = np.meshgrid(np.linspace(hull.stations_x[0], hull.stations_x[-1], 8), np.linspace(-hull.B/2, hull.B/2, 8))
         zp = np.full_like(xp, viz_draft)
@@ -1505,14 +1563,14 @@ else:
         ))
         
         fig_3d.update_layout(
-            title=f"Casco 3D: {st.session_state.ship_name}",
+            title=f"Casco 3D Integrado com Cortes do Plano de Linhas: {st.session_state.ship_name}",
             scene=dict(
                 xaxis_title="X (m) [Longitudinal]",
                 yaxis_title="Y (m) [Transversal]",
                 zaxis_title="Z (m) [Vertical]",
                 aspectmode='data'
             ),
-            template="plotly_dark", height=500, margin=dict(l=10, r=10, t=40, b=10)
+            template="plotly_dark", height=540, margin=dict(l=10, r=10, t=40, b=10)
         )
         st.plotly_chart(fig_3d, use_container_width=True)
 
