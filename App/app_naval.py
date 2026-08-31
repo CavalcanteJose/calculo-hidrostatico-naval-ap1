@@ -1334,7 +1334,7 @@ else:
             return fig
 
         # ----------------------------------------------------------------------
-        # LINHAS D'ÁGUA LONGITUDINAIS (PERFIL LATERAL DO CASCO - MODELO LINEAR / FLUXO)
+        # LINHAS D'ÁGUA LONGITUDINAIS (PERFIL LATERAL DO CASCO - ABAIXO DO CALADO T)
         # ----------------------------------------------------------------------
         def get_longitudinal_waterlines_figure():
             fig = go.Figure()
@@ -1342,59 +1342,59 @@ else:
             zs = hull.waterlines_z
             x0 = float(xs[0])
             x_end = float(xs[-1])
-            D_nom = float(hull.D)
             xs_scan = np.linspace(x0, x_end, 200)
 
-            # 1. Grid de Referência (Estações em vermelho)
+            # 1. Grid de Referência (Estações em vermelho até o calado T)
             for j, st_x in enumerate(xs):
                 fig.add_vline(
                     x=st_x, line_dash="solid", line_color="rgba(239, 68, 68, 0.35)", line_width=1.0,
                     annotation_text=f"ST {j:02d}", annotation_position="top"
                 )
 
-            # 2. Contorno do Casco (Silhueta Lateral)
+            # 2. Contorno do Casco Submerso / Carena (Abaixo da Linha d'Água no Calado T)
             keel_x, keel_z = [], []
             for x in xs_scan:
-                y_top = hull.get_y_continuous(x, D_nom)
-                y_mid = hull.get_y_continuous(x, D_nom * 0.4)
-                if y_top < 0.002 and y_mid < 0.002:
+                y_at_t = hull.get_y_continuous(x, viz_draft)
+                y_at_mid = hull.get_y_continuous(x, viz_draft * 0.5)
+                if y_at_t < 0.002 and y_at_mid < 0.002:
                     continue
-                y_wl1 = hull.get_y_continuous(x, zs[1] if len(zs) > 1 else D_nom * 0.1)
-                y_wl2 = hull.get_y_continuous(x, zs[2] if len(zs) > 2 else D_nom * 0.2)
+                y_wl1 = hull.get_y_continuous(x, zs[1] if len(zs) > 1 else viz_draft * 0.1)
+                y_wl2 = hull.get_y_continuous(x, zs[2] if len(zs) > 2 else viz_draft * 0.2)
                 if y_wl1 < 0.002 and y_wl2 < 0.002:
-                    zs_s = np.linspace(0, D_nom, 60)
+                    zs_s = np.linspace(0, viz_draft, 60)
                     yp = np.array([hull.get_y_continuous(x, z) for z in zs_s])
                     pos = np.where(yp > 0.002)[0]
                     z_keel = float(zs_s[pos[0]]) if len(pos) > 0 else 0.0
                 else:
                     z_keel = 0.0
                 keel_x.append(x)
-                keel_z.append(z_keel)
+                keel_z.append(min(viz_draft, z_keel))
 
-            keel_x = np.array(keel_x)
-            keel_z = np.array(keel_z)
-            z_deck = np.full_like(keel_x, D_nom)
+            if len(keel_x) >= 2:
+                keel_x = np.array(keel_x)
+                keel_z = np.array(keel_z)
+                z_waterline = np.full_like(keel_x, viz_draft)
 
-            sil_x = np.concatenate([keel_x, keel_x[::-1]])
-            sil_z = np.concatenate([keel_z, z_deck[::-1]])
-            fig.add_trace(go.Scatter(
-                x=sil_x, y=sil_z, mode='lines',
-                fill='toself', fillcolor='rgba(59, 130, 246, 0.08)',
-                name="Contorno Lateral do Casco",
-                line=dict(color="#fca311", width=3.0)
-            ))
-            fig.add_trace(go.Scatter(
-                x=[x0, x0], y=[0.0, D_nom], mode='lines',
-                name="Espelho de Popa",
-                line=dict(color="#fca311", width=3.0), showlegend=False
-            ))
-            fig.add_trace(go.Scatter(
-                x=keel_x, y=keel_z, mode='lines',
-                name="Quilha & Roda de Proa",
-                line=dict(color="#ffffff", width=2.8)
-            ))
+                sil_x = np.concatenate([keel_x, keel_x[::-1]])
+                sil_z = np.concatenate([keel_z, z_waterline[::-1]])
+                fig.add_trace(go.Scatter(
+                    x=sil_x, y=sil_z, mode='lines',
+                    fill='toself', fillcolor='rgba(59, 130, 246, 0.12)',
+                    name="Perfil Submerso da Carena (Obras Vivas)",
+                    line=dict(color="#fca311", width=2.8)
+                ))
+                fig.add_trace(go.Scatter(
+                    x=[x0, x0], y=[0.0, viz_draft], mode='lines',
+                    name="Espelho de Popa Submerso",
+                    line=dict(color="#fca311", width=2.8), showlegend=False
+                ))
+                fig.add_trace(go.Scatter(
+                    x=keel_x, y=keel_z, mode='lines',
+                    name="Quilha & Roda de Proa Submersa",
+                    line=dict(color="#ffffff", width=2.8)
+                ))
 
-            # 3. Linhas de Fluxo Longitudinais (Modelo Linear suave até o ápice da proa)
+            # 3. Linhas de Fluxo Longitudinais (Abaixo da Linha d'Água no Calado T)
             flow_specs = [
                 {"name": "Linha Longitudinal I (Y = 0.15 B)", "frac": 0.15, "exp_bow": 4.20, "exp_stern": 1.90, "color": "#f43f5e"},
                 {"name": "Linha Longitudinal II (Y = 0.32 B)", "frac": 0.32, "exp_bow": 3.40, "exp_stern": 1.85, "color": "#fb923c"},
@@ -1403,14 +1403,18 @@ else:
                 {"name": "Linha Longitudinal V (Y = 0.88 B)", "frac": 0.88, "exp_bow": 1.45, "exp_stern": 1.70, "color": "#38bdf8"}
             ]
             x_mid = float(xs[len(xs) // 2])
-            xs_dense = np.linspace(x0, x_end, 150)
+            x_end_t = float(keel_x[-1]) if len(keel_x) >= 2 else x_end
+            xs_dense = np.linspace(x0, x_end_t, 150)
 
             for flow in flow_specs:
                 yc = (hull.B / 2.0) * flow["frac"]
                 col_mid = [hull.get_y(len(xs) // 2, wz) for wz in zs]
-                z_min = float(np.interp(yc, col_mid, zs)) if np.max(col_mid) >= yc else float(D_nom * (0.10 + 0.75 * flow["frac"]))
+                z_min_raw = float(np.interp(yc, col_mid, zs)) if np.max(col_mid) >= yc else float(viz_draft * (0.10 + 0.65 * flow["frac"]))
+                z_min = min(viz_draft * 0.92, z_min_raw)
+
                 col_0 = [hull.get_y(0, wz) for wz in zs]
-                z_stern = float(np.interp(yc, col_0, zs)) if np.max(col_0) >= yc else float(min(D_nom, z_min + 0.30 + 0.40 * flow["frac"]))
+                z_stern_raw = float(np.interp(yc, col_0, zs)) if np.max(col_0) >= yc else float(min(viz_draft, z_min + 0.25 + 0.30 * flow["frac"]))
+                z_stern = min(viz_draft, max(z_min, z_stern_raw))
 
                 exp_bow = flow["exp_bow"]
                 exp_stern = flow["exp_stern"]
@@ -1418,12 +1422,12 @@ else:
                 zs_flow = []
                 for x in xs_dense:
                     if x >= x_mid:
-                        t = (x - x_mid) / (x_end - x_mid)
-                        z_val = z_min + (D_nom - z_min) * (t ** exp_bow)
+                        t = (x - x_mid) / max(1e-5, (x_end_t - x_mid))
+                        z_val = z_min + (viz_draft - z_min) * (t ** exp_bow)
                     else:
-                        t = (x_mid - x) / (x_mid - x0)
+                        t = (x_mid - x) / max(1e-5, (x_mid - x0))
                         z_val = z_min + (z_stern - z_min) * (t ** exp_stern)
-                    zs_flow.append(z_val)
+                    zs_flow.append(min(viz_draft, z_val))
 
                 zs_flow = np.array(zs_flow)
                 fig.add_trace(go.Scatter(
@@ -1432,33 +1436,19 @@ else:
                     line=dict(color=flow["color"], width=2.6)
                 ))
 
-            # 4. Linha d'Água Ativa no Calado (Onde a água bate no barco)
-            seg_t, in_t, xt_start = [], False, None
-            for x in xs_scan:
-                y = hull.get_y_continuous(x, viz_draft)
-                if y > 0.002 and not in_t:
-                    xt_start = x
-                    in_t = True
-                elif y <= 0.002 and in_t:
-                    seg_t.append((xt_start, x))
-                    in_t = False
-            if in_t:
-                seg_t.append((xt_start, xs_scan[-1]))
-
-            for i, (xs_t, xe_t) in enumerate(seg_t):
-                fig.add_trace(go.Scatter(
-                    x=[xs_t, xe_t], y=[viz_draft, viz_draft], mode='lines',
-                    name=f"★ Linha d'Água no Calado T = {viz_draft:.2f}m (Linha de Flutuação)",
-                    showlegend=(i == 0),
-                    line=dict(color="#00f5d4", width=3.5, dash="solid")
-                ))
+            # 4. Linha d'Água Ativa no Calado T (Plano Superior da Superfície da Água)
+            fig.add_trace(go.Scatter(
+                x=[x0, x_end_t], y=[viz_draft, viz_draft], mode='lines',
+                name=f"★ Linha d'Água no Calado T = {viz_draft:.2f}m (Linha de Flutuação)",
+                line=dict(color="#00f5d4", width=4.0, dash="solid")
+            ))
 
             fig.update_layout(
-                title=f"Linhas d'Água Longitudinais (Perfil Lateral — Calado Ativo T = {viz_draft:.2f}m)",
+                title=f"Linhas d'Água Longitudinais da Carena (Submerso abaixo do Calado T = {viz_draft:.2f}m)",
                 xaxis_title="Comprimento X (m) — PR (Popa) → PV (Proa)",
                 yaxis_title="Altura Z (m) — Linha de Base (LB) = 0",
-                yaxis=dict(range=[-0.05, D_nom + 0.15]),
-                template="plotly_dark", height=500,
+                yaxis=dict(range=[-0.04, viz_draft + 0.08]),
+                template="plotly_dark", height=460,
                 margin=dict(l=25, r=25, t=45, b=25),
                 legend=dict(orientation="h", yanchor="bottom", y=-0.48, xanchor="center", x=0.5)
             )
@@ -1495,7 +1485,7 @@ else:
             show_3d_waterlines = st.toggle(
                 "🌊 Linhas d'Água 3D",
                 value=True,
-                help="Ativa/desativa as Linhas d'Água longitudinais coladas na casca 3D (incluindo a linha de flutuação no calado ativo)."
+                help="Ativa/desativa as Linhas d'Água longitudinais coladas na casca 3D (abaixo do calado ativo)."
             )
         with col_3d_t3:
             show_3d_keel = st.toggle(
@@ -1561,7 +1551,7 @@ else:
                         showlegend=False
                     ))
 
-        # 2. Linhas d'Água Longitudinais em 3D (Modelo Linear / Escoamento até a Proa)
+        # 2. Linhas d'Água Longitudinais em 3D (Modelo Linear / Escoamento da Carena Submersa até o Calado T)
         if show_3d_waterlines:
             flow_specs_3d = [
                 {"name": "Linha Longitudinal I (Y = 0.15 B)", "frac": 0.15, "exp_bow": 4.20, "exp_stern": 1.90, "color": "#f43f5e"},
@@ -1574,9 +1564,12 @@ else:
             for flow in flow_specs_3d:
                 yc = (hull.B / 2.0) * flow["frac"]
                 col_m = [hull.get_y(len(hull.stations_x) // 2, wz) for wz in hull.waterlines_z]
-                z_min_3d = float(np.interp(yc, col_m, hull.waterlines_z)) if np.max(col_m) >= yc else float(d_nom_3d * (0.10 + 0.75 * flow["frac"]))
+                z_min_3d = float(np.interp(yc, col_m, hull.waterlines_z)) if np.max(col_m) >= yc else float(viz_draft * (0.10 + 0.65 * flow["frac"]))
+                z_min_3d = min(viz_draft * 0.92, z_min_3d)
+
                 col_p = [hull.get_y(0, wz) for wz in hull.waterlines_z]
-                z_stern_3d = float(np.interp(yc, col_p, hull.waterlines_z)) if np.max(col_p) >= yc else float(min(d_nom_3d, z_min_3d + 0.30 + 0.40 * flow["frac"]))
+                z_stern_3d = float(np.interp(yc, col_p, hull.waterlines_z)) if np.max(col_p) >= yc else float(min(viz_draft, z_min_3d + 0.25 + 0.30 * flow["frac"]))
+                z_stern_3d = min(viz_draft, max(z_min_3d, z_stern_3d))
 
                 exp_b = flow["exp_bow"]
                 exp_s = flow["exp_stern"]
@@ -1585,11 +1578,12 @@ else:
                 for x in xs_dense_3d:
                     if x >= x_mid_3d:
                         t = (x - x_mid_3d) / (x_end_3d - x_mid_3d)
-                        z_val = z_min_3d + (d_nom_3d - z_min_3d) * (t ** exp_b)
+                        z_val = z_min_3d + (viz_draft - z_min_3d) * (t ** exp_b)
                     else:
                         t = (x_mid_3d - x) / x_mid_3d
                         z_val = z_min_3d + (z_stern_3d - z_min_3d) * (t ** exp_s)
 
+                    z_val = min(viz_draft, z_val)
                     y_val = float(hull.get_y_continuous(x, z_val))
                     pts_x_3d.append(x)
                     pts_y_3d.append(y_val)
