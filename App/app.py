@@ -1069,18 +1069,6 @@ else:
                 horizontal=True
             )
 
-        col_met1, col_met2 = st.columns([3, 2])
-        with col_met1:
-            sheer_method = st.radio(
-                "⚙️ Metodologia do Plano de Linhas do Alto:",
-                [
-                    "🚢 Modelo Real (Interseção Pura da Tabela de Cotas)",
-                    "📐 Modelo Linear (Adoçamento Contínuo até a Proa - Standby)"
-                ],
-                horizontal=True,
-                help="Alterne entre o Modelo Real (interseção analítica direta da tabela de cotas) e o Modelo Linear (adoçamento contínuo)."
-            )
-
         st.write("")
 
         def eval_hull_y(x_val, z_val):
@@ -1300,63 +1288,31 @@ else:
                 line=dict(color="#ffffff", width=3.2)
             ))
 
-            # 6. Linhas do Alto (Cortes Longitudinais: Modelo Real vs Modelo Linear)
+            # 6. Linhas do Alto (Plano de Linhas do Alto = Modelo Real / Interseção Pura da Tabela de Cotas)
             cuts_specs = [
-                {"name": "Corte I (Y = 0.15 B)", "frac": 0.15, "exp_bow": 4.20, "exp_stern": 1.90, "color": "#f43f5e"},
-                {"name": "Corte II (Y = 0.32 B)", "frac": 0.32, "exp_bow": 3.40, "exp_stern": 1.85, "color": "#fb923c"},
-                {"name": "Corte III (Y = 0.50 B)", "frac": 0.50, "exp_bow": 2.70, "exp_stern": 1.80, "color": "#facc15"},
-                {"name": "Corte IV (Y = 0.70 B)", "frac": 0.70, "exp_bow": 2.05, "exp_stern": 1.75, "color": "#22c55e"},
-                {"name": "Corte V (Y = 0.88 B)", "frac": 0.88, "exp_bow": 1.45, "exp_stern": 1.70, "color": "#38bdf8"}
+                {"name": "Corte I (Y = 0.15 B)", "frac": 0.15, "color": "#f43f5e"},
+                {"name": "Corte II (Y = 0.32 B)", "frac": 0.32, "color": "#fb923c"},
+                {"name": "Corte III (Y = 0.50 B)", "frac": 0.50, "color": "#facc15"},
+                {"name": "Corte IV (Y = 0.70 B)", "frac": 0.70, "color": "#22c55e"},
+                {"name": "Corte V (Y = 0.88 B)", "frac": 0.88, "color": "#38bdf8"}
             ]
 
-            x_mid = float(xs[len(xs) // 2])
             xs_dense = np.linspace(x0, x_end, 150)
+            zs_scan = np.linspace(0.0, D_nom, 80)
+            for cut in cuts_specs:
+                yc = (hull.B / 2.0) * cut["frac"]
+                pts_x, pts_z = [], []
+                for x in xs_dense:
+                    y_profile = np.array([hull.get_y_continuous(x, z) for z in zs_scan])
+                    if np.max(y_profile) < yc:
+                        continue
+                    z_found = float(np.interp(yc, y_profile, zs_scan))
+                    pts_x.append(x)
+                    pts_z.append(z_found)
 
-            if sheer_method == "🚢 Modelo Real (Interseção Pura da Tabela de Cotas)":
-                zs_scan = np.linspace(0.0, D_nom, 80)
-                for cut in cuts_specs:
-                    yc = (hull.B / 2.0) * cut["frac"]
-                    pts_x, pts_z = [], []
-                    for x in xs_dense:
-                        y_profile = np.array([hull.get_y_continuous(x, z) for z in zs_scan])
-                        if np.max(y_profile) < yc:
-                            continue
-                        z_found = float(np.interp(yc, y_profile, zs_scan))
-                        pts_x.append(x)
-                        pts_z.append(z_found)
-
-                    if len(pts_x) >= 2:
-                        fig.add_trace(go.Scatter(
-                            x=pts_x, y=pts_z, mode='lines',
-                            name=f"Linha do Alto {cut['name']}",
-                            line=dict(color=cut["color"], width=2.6)
-                        ))
-            else:
-                # Modelo Linear (Adoçamento Contínuo até a Proa - Standby)
-                for cut in cuts_specs:
-                    yc = (hull.B / 2.0) * cut["frac"]
-                    col_mid = [hull.get_y(len(xs) // 2, wz) for wz in zs]
-                    z_min = float(np.interp(yc, col_mid, zs)) if np.max(col_mid) >= yc else float(D_nom * (0.10 + 0.75 * cut["frac"]))
-                    col_0 = [hull.get_y(0, wz) for wz in zs]
-                    z_stern = float(np.interp(yc, col_0, zs)) if np.max(col_0) >= yc else float(min(D_nom, z_min + 0.30 + 0.40 * cut["frac"]))
-
-                    exp_bow = cut["exp_bow"]
-                    exp_stern = cut["exp_stern"]
-
-                    zs_cut = []
-                    for x in xs_dense:
-                        if x >= x_mid:
-                            t = (x - x_mid) / (x_end - x_mid)
-                            z_val = z_min + (D_nom - z_min) * (t ** exp_bow)
-                        else:
-                            t = (x_mid - x) / (x_mid - x0)
-                            z_val = z_min + (z_stern - z_min) * (t ** exp_stern)
-                        zs_cut.append(z_val)
-
-                    zs_cut = np.array(zs_cut)
-
+                if len(pts_x) >= 2:
                     fig.add_trace(go.Scatter(
-                        x=xs_dense, y=zs_cut, mode='lines',
+                        x=pts_x, y=pts_z, mode='lines',
                         name=f"Linha do Alto {cut['name']}",
                         line=dict(color=cut["color"], width=2.6)
                     ))
@@ -1368,15 +1324,17 @@ else:
             )
 
             fig.update_layout(
-                title=f"Plano de Linhas do Alto (Sheer / Buttock Plan — {sheer_method.split('(')[0].strip()})",
+                title="Plano de Linhas do Alto (Sheer / Buttock Plan — Cortes Longitudinais da Tabela de Cotas)",
                 xaxis_title="Comprimento Longitudinal X (m) [PR (Popa) → SM (Meia-Nau) → PV (Proa)]",
                 yaxis_title="Altura Vertical Z (m) a partir da Linha de Base (LB)",
                 yaxis=dict(range=[-0.05, D_nom + 0.15]),
                 template="plotly_dark", height=500, margin=dict(l=25, r=25, t=45, b=25),
                 legend=dict(orientation="h", yanchor="bottom", y=-0.42, xanchor="center", x=0.5)
             )
+            return fig
+
         # ----------------------------------------------------------------------
-        # LINHAS D'ÁGUA LONGITUDINAIS (PERFIL LATERAL DO CASCO)
+        # LINHAS D'ÁGUA LONGITUDINAIS (PERFIL LATERAL DO CASCO - MODELO LINEAR / FLUXO)
         # ----------------------------------------------------------------------
         def get_longitudinal_waterlines_figure():
             fig = go.Figure()
@@ -1436,35 +1394,43 @@ else:
                 line=dict(color="#ffffff", width=2.8)
             ))
 
-            # 3. Linhas d'Água Longitudinais (WL 01 a WL 10)
-            wl_colors = [
-                "#ef4444", "#f97316", "#eab308", "#22c55e",
-                "#06b6d4", "#6366f1", "#a855f7", "#ec4899",
-                "#94a3b8", "#ffffff", "#fca311"
+            # 3. Linhas de Fluxo Longitudinais (Modelo Linear suave até o ápice da proa)
+            flow_specs = [
+                {"name": "Linha Longitudinal I (Y = 0.15 B)", "frac": 0.15, "exp_bow": 4.20, "exp_stern": 1.90, "color": "#f43f5e"},
+                {"name": "Linha Longitudinal II (Y = 0.32 B)", "frac": 0.32, "exp_bow": 3.40, "exp_stern": 1.85, "color": "#fb923c"},
+                {"name": "Linha Longitudinal III (Y = 0.50 B)", "frac": 0.50, "exp_bow": 2.70, "exp_stern": 1.80, "color": "#facc15"},
+                {"name": "Linha Longitudinal IV (Y = 0.70 B)", "frac": 0.70, "exp_bow": 2.05, "exp_stern": 1.75, "color": "#22c55e"},
+                {"name": "Linha Longitudinal V (Y = 0.88 B)", "frac": 0.88, "exp_bow": 1.45, "exp_stern": 1.70, "color": "#38bdf8"}
             ]
-            for k, wl_z in enumerate(zs):
-                if wl_z == 0.0:
-                    continue
-                seg_x, in_hull, x_start = [], False, None
-                for x in xs_scan:
-                    y = hull.get_y_continuous(x, wl_z)
-                    if y > 0.002 and not in_hull:
-                        x_start = x
-                        in_hull = True
-                    elif y <= 0.002 and in_hull:
-                        seg_x.append((x_start, x))
-                        in_hull = False
-                if in_hull:
-                    seg_x.append((x_start, xs_scan[-1]))
+            x_mid = float(xs[len(xs) // 2])
+            xs_dense = np.linspace(x0, x_end, 150)
 
-                color = wl_colors[k % len(wl_colors)]
-                for i, (xs_seg, xe_seg) in enumerate(seg_x):
-                    fig.add_trace(go.Scatter(
-                        x=[xs_seg, xe_seg], y=[wl_z, wl_z], mode='lines',
-                        name=f"WL {k:02d} (Z={wl_z:.2f}m)" if i == 0 else None,
-                        showlegend=(i == 0),
-                        line=dict(color=color, width=2.0)
-                    ))
+            for flow in flow_specs:
+                yc = (hull.B / 2.0) * flow["frac"]
+                col_mid = [hull.get_y(len(xs) // 2, wz) for wz in zs]
+                z_min = float(np.interp(yc, col_mid, zs)) if np.max(col_mid) >= yc else float(D_nom * (0.10 + 0.75 * flow["frac"]))
+                col_0 = [hull.get_y(0, wz) for wz in zs]
+                z_stern = float(np.interp(yc, col_0, zs)) if np.max(col_0) >= yc else float(min(D_nom, z_min + 0.30 + 0.40 * flow["frac"]))
+
+                exp_bow = flow["exp_bow"]
+                exp_stern = flow["exp_stern"]
+
+                zs_flow = []
+                for x in xs_dense:
+                    if x >= x_mid:
+                        t = (x - x_mid) / (x_end - x_mid)
+                        z_val = z_min + (D_nom - z_min) * (t ** exp_bow)
+                    else:
+                        t = (x_mid - x) / (x_mid - x0)
+                        z_val = z_min + (z_stern - z_min) * (t ** exp_stern)
+                    zs_flow.append(z_val)
+
+                zs_flow = np.array(zs_flow)
+                fig.add_trace(go.Scatter(
+                    x=xs_dense, y=zs_flow, mode='lines',
+                    name=flow["name"],
+                    line=dict(color=flow["color"], width=2.6)
+                ))
 
             # 4. Linha d'Água Ativa no Calado (Onde a água bate no barco)
             seg_t, in_t, xt_start = [], False, None
@@ -1558,74 +1524,35 @@ else:
         x_end_3d = float(hull.stations_x[-1])
         d_nom_3d = float(hull.D)
         
-        # 1. Linhas do Alto em 3D (Opcionais via Toggle do Usuário)
+        # 1. Linhas do Alto em 3D (Modelo Real da Tabela de Cotas)
         if show_3d_buttocks:
             cuts_specs_3d = [
-                {"name": "Corte I (Y = 0.15 B)", "frac": 0.15, "exp_bow": 4.20, "exp_stern": 1.90, "color": "#f43f5e"},
-                {"name": "Corte II (Y = 0.32 B)", "frac": 0.32, "exp_bow": 3.40, "exp_stern": 1.85, "color": "#fb923c"},
-                {"name": "Corte III (Y = 0.50 B)", "frac": 0.50, "exp_bow": 2.70, "exp_stern": 1.80, "color": "#facc15"},
-                {"name": "Corte IV (Y = 0.70 B)", "frac": 0.70, "exp_bow": 2.05, "exp_stern": 1.75, "color": "#22c55e"},
-                {"name": "Corte V (Y = 0.88 B)", "frac": 0.88, "exp_bow": 1.45, "exp_stern": 1.70, "color": "#38bdf8"}
+                {"name": "Corte I (Y = 0.15 B)", "frac": 0.15, "color": "#f43f5e"},
+                {"name": "Corte II (Y = 0.32 B)", "frac": 0.32, "color": "#fb923c"},
+                {"name": "Corte III (Y = 0.50 B)", "frac": 0.50, "color": "#facc15"},
+                {"name": "Corte IV (Y = 0.70 B)", "frac": 0.70, "color": "#22c55e"},
+                {"name": "Corte V (Y = 0.88 B)", "frac": 0.88, "color": "#38bdf8"}
             ]
+            zs_scan_3d = np.linspace(0.0, d_nom_3d, 80)
+            for cut in cuts_specs_3d:
+                yc = (hull.B / 2.0) * cut["frac"]
+                pts_x_3d, pts_y_3d, pts_z_3d = [], [], []
+                for x in xs_dense_3d:
+                    y_profile = np.array([hull.get_y_continuous(x, z) for z in zs_scan_3d])
+                    if np.max(y_profile) < yc:
+                        continue
+                    z_found = float(np.interp(yc, y_profile, zs_scan_3d))
+                    y_val = float(hull.get_y_continuous(x, z_found))
+                    pts_x_3d.append(x)
+                    pts_y_3d.append(y_val)
+                    pts_z_3d.append(z_found)
 
-            if sheer_method == "🚢 Modelo Real (Interseção Pura da Tabela de Cotas)":
-                zs_scan_3d = np.linspace(0.0, d_nom_3d, 80)
-                for cut in cuts_specs_3d:
-                    yc = (hull.B / 2.0) * cut["frac"]
-                    pts_x_3d, pts_y_3d, pts_z_3d = [], [], []
-                    for x in xs_dense_3d:
-                        y_profile = np.array([hull.get_y_continuous(x, z) for z in zs_scan_3d])
-                        if np.max(y_profile) < yc:
-                            continue
-                        z_found = float(np.interp(yc, y_profile, zs_scan_3d))
-                        y_val = float(hull.get_y_continuous(x, z_found))
-                        pts_x_3d.append(x)
-                        pts_y_3d.append(y_val)
-                        pts_z_3d.append(z_found)
-
-                    if len(pts_x_3d) >= 2:
-                        # Boreste (+Y)
-                        fig_3d.add_trace(go.Scatter3d(
-                            x=pts_x_3d, y=pts_y_3d, z=pts_z_3d,
-                            mode='lines', line=dict(color=cut["color"], width=5.5),
-                            name=f"3D: {cut['name']}"
-                        ))
-                        # Bombordo (-Y)
-                        fig_3d.add_trace(go.Scatter3d(
-                            x=pts_x_3d, y=[-y for y in pts_y_3d], z=pts_z_3d,
-                            mode='lines', line=dict(color=cut["color"], width=5.5),
-                            showlegend=False
-                        ))
-            else:
-                for cut in cuts_specs_3d:
-                    yc = (hull.B / 2.0) * cut["frac"]
-                    col_m = [hull.get_y(len(hull.stations_x) // 2, wz) for wz in hull.waterlines_z]
-                    z_min_3d = float(np.interp(yc, col_m, hull.waterlines_z)) if np.max(col_m) >= yc else float(d_nom_3d * (0.10 + 0.75 * cut["frac"]))
-                    col_p = [hull.get_y(0, wz) for wz in hull.waterlines_z]
-                    z_stern_3d = float(np.interp(yc, col_p, hull.waterlines_z)) if np.max(col_p) >= yc else float(min(d_nom_3d, z_min_3d + 0.30 + 0.40 * cut["frac"]))
-
-                    exp_b = cut["exp_bow"]
-                    exp_s = cut["exp_stern"]
-
-                    pts_x_3d, pts_y_3d, pts_z_3d = [], [], []
-                    for x in xs_dense_3d:
-                        if x >= x_mid_3d:
-                            t = (x - x_mid_3d) / (x_end_3d - x_mid_3d)
-                            z_val = z_min_3d + (d_nom_3d - z_min_3d) * (t ** exp_b)
-                        else:
-                            t = (x_mid_3d - x) / x_mid_3d
-                            z_val = z_min_3d + (z_stern_3d - z_min_3d) * (t ** exp_s)
-
-                        y_val = float(hull.get_y_continuous(x, z_val))
-                        pts_x_3d.append(x)
-                        pts_y_3d.append(y_val)
-                        pts_z_3d.append(z_val)
-
+                if len(pts_x_3d) >= 2:
                     # Boreste (+Y)
                     fig_3d.add_trace(go.Scatter3d(
                         x=pts_x_3d, y=pts_y_3d, z=pts_z_3d,
                         mode='lines', line=dict(color=cut["color"], width=5.5),
-                        name=f"3D: {cut['name']}"
+                        name=f"3D: Linha do Alto {cut['name']}"
                     ))
                     # Bombordo (-Y)
                     fig_3d.add_trace(go.Scatter3d(
@@ -1634,43 +1561,54 @@ else:
                         showlegend=False
                     ))
 
-        # 2. Linhas d'Água Longitudinais em 3D (Opcionais via Toggle do Usuário)
+        # 2. Linhas d'Água Longitudinais em 3D (Modelo Linear / Escoamento até a Proa)
         if show_3d_waterlines:
-            wl_colors_3d = [
-                "#ef4444", "#f97316", "#eab308", "#22c55e",
-                "#06b6d4", "#6366f1", "#a855f7", "#ec4899",
-                "#94a3b8", "#ffffff", "#fca311"
+            flow_specs_3d = [
+                {"name": "Linha Longitudinal I (Y = 0.15 B)", "frac": 0.15, "exp_bow": 4.20, "exp_stern": 1.90, "color": "#f43f5e"},
+                {"name": "Linha Longitudinal II (Y = 0.32 B)", "frac": 0.32, "exp_bow": 3.40, "exp_stern": 1.85, "color": "#fb923c"},
+                {"name": "Linha Longitudinal III (Y = 0.50 B)", "frac": 0.50, "exp_bow": 2.70, "exp_stern": 1.80, "color": "#facc15"},
+                {"name": "Linha Longitudinal IV (Y = 0.70 B)", "frac": 0.70, "exp_bow": 2.05, "exp_stern": 1.75, "color": "#22c55e"},
+                {"name": "Linha Longitudinal V (Y = 0.88 B)", "frac": 0.88, "exp_bow": 1.45, "exp_stern": 1.70, "color": "#38bdf8"}
             ]
-            xs_wl_3d = np.linspace(hull.stations_x[0], hull.stations_x[-1], 150)
-            for k, wz in enumerate(hull.waterlines_z):
-                if wz <= 0.0:
-                    continue
-                pts_x_wl, pts_y_wl, pts_z_wl = [], [], []
-                for x in xs_wl_3d:
-                    y = float(hull.get_y_continuous(x, wz))
-                    if y > 0.001:
-                        pts_x_wl.append(x)
-                        pts_y_wl.append(y)
-                        pts_z_wl.append(wz)
 
-                if len(pts_x_wl) >= 2:
-                    color = wl_colors_3d[k % len(wl_colors_3d)]
-                    # Boreste (+Y)
-                    fig_3d.add_trace(go.Scatter3d(
-                        x=pts_x_wl, y=pts_y_wl, z=pts_z_wl,
-                        mode='lines', line=dict(color=color, width=4.0),
-                        name=f"3D: WL {k:02d} (Z={wz:.2f}m)"
-                    ))
-                    # Bombordo (-Y)
-                    fig_3d.add_trace(go.Scatter3d(
-                        x=pts_x_wl, y=[-y for y in pts_y_wl], z=pts_z_wl,
-                        mode='lines', line=dict(color=color, width=4.0),
-                        showlegend=False
-                    ))
+            for flow in flow_specs_3d:
+                yc = (hull.B / 2.0) * flow["frac"]
+                col_m = [hull.get_y(len(hull.stations_x) // 2, wz) for wz in hull.waterlines_z]
+                z_min_3d = float(np.interp(yc, col_m, hull.waterlines_z)) if np.max(col_m) >= yc else float(d_nom_3d * (0.10 + 0.75 * flow["frac"]))
+                col_p = [hull.get_y(0, wz) for wz in hull.waterlines_z]
+                z_stern_3d = float(np.interp(yc, col_p, hull.waterlines_z)) if np.max(col_p) >= yc else float(min(d_nom_3d, z_min_3d + 0.30 + 0.40 * flow["frac"]))
+
+                exp_b = flow["exp_bow"]
+                exp_s = flow["exp_stern"]
+
+                pts_x_3d, pts_y_3d, pts_z_3d = [], [], []
+                for x in xs_dense_3d:
+                    if x >= x_mid_3d:
+                        t = (x - x_mid_3d) / (x_end_3d - x_mid_3d)
+                        z_val = z_min_3d + (d_nom_3d - z_min_3d) * (t ** exp_b)
+                    else:
+                        t = (x_mid_3d - x) / x_mid_3d
+                        z_val = z_min_3d + (z_stern_3d - z_min_3d) * (t ** exp_s)
+
+                    y_val = float(hull.get_y_continuous(x, z_val))
+                    pts_x_3d.append(x)
+                    pts_y_3d.append(y_val)
+                    pts_z_3d.append(z_val)
+
+                fig_3d.add_trace(go.Scatter3d(
+                    x=pts_x_3d, y=pts_y_3d, z=pts_z_3d,
+                    mode='lines', line=dict(color=flow["color"], width=5.5),
+                    name=f"3D: {flow['name']}"
+                ))
+                fig_3d.add_trace(go.Scatter3d(
+                    x=pts_x_3d, y=[-y for y in pts_y_3d], z=pts_z_3d,
+                    mode='lines', line=dict(color=flow["color"], width=5.5),
+                    showlegend=False
+                ))
 
             # Linha d'Água Ativa no Calado T em 3D (Linha de Flutuação onde a água bate no casco)
             pts_x_t, pts_y_t, pts_z_t = [], [], []
-            for x in xs_wl_3d:
+            for x in xs_dense_3d:
                 y = float(hull.get_y_continuous(x, viz_draft))
                 if y > 0.001:
                     pts_x_t.append(x)
@@ -1693,7 +1631,6 @@ else:
         if show_3d_keel:
             keel_stem_3d_x = [float(hull.stations_x[0]), float(hull.stations_x[len(hull.stations_x)//2])]
             keel_stem_3d_z = [0.0, 0.0]
-            
             for k in range(1, len(hull.waterlines_z)):
                 row_k = [hull.get_y(j, hull.waterlines_z[k]) for j in range(len(hull.stations_x))]
                 pos_idx = np.where(np.array(row_k) > 0.001)[0]
@@ -1729,6 +1666,8 @@ else:
                 mode='lines', line=dict(color="#ffffff", width=7.0),
                 name="3D: Roda de Proa & Quilha (Y=0)"
             ))
+
+
 
         # Plano da Água Flutuante
         xp, yp = np.meshgrid(np.linspace(hull.stations_x[0], hull.stations_x[-1], 8), np.linspace(-hull.B/2, hull.B/2, 8))
