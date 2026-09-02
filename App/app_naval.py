@@ -343,66 +343,190 @@ def smart_parse_offset_table(uploaded_file):
 
 
 # ==============================================================================
-# 1. MÉTODOS DE INTEGRAÇÃO NUMÉRICA MANUAL (Item 9 do Edital)
+# 1. MÉTODOS DE INTEGRAÇÃO NUMÉRICA DIRETA & AUDITORIA POR TRECHO
 # ==============================================================================
 def trapz_rule(x, y):
+    """
+    Regra dos Trapézios (1º grau / linear):
+    Integral para 1 intervalo (2 pontos): (h / 2) * (y0 + y1)
+    Generalizada: (h / 2) * [y0 + 2*sum(y_interm) + yn]
+    """
     x, y = np.asarray(x, dtype=float), np.asarray(y, dtype=float)
-    if len(x) < 2: return 0.0
+    if len(x) < 2:
+        return 0.0
     return float(np.sum(0.5 * (y[:-1] + y[1:]) * np.diff(x)))
 
+
 def simpson_13_rule(y, h):
+    """
+    Regra de Simpson 1/3 (1ª Regra de Simpson / interpolação parabólica de 2º grau):
+    Requer número ímpar de pontos (número par de intervalos).
+    Fórmula para 2 intervalos (3 pontos): (h / 3) * (y0 + 4*y1 + y2)
+    Fórmula Composta: (h / 3) * [y0 + yn + 4*sum(y_impares) + 2*sum(y_pares)]
+    """
+    y = np.asarray(y, dtype=float)
     if len(y) < 3 or (len(y) % 2 == 0):
-        raise ValueError("Simpson 1/3 requer número ímpar de pontos.")
+        raise ValueError("Simpson 1/3 requer número ímpar de pontos (múltiplo de 2 intervalos).")
     s = y[0] + y[-1] + 4.0 * np.sum(y[1:-1:2]) + 2.0 * np.sum(y[2:-2:2])
     return float((h / 3.0) * s)
 
+
 def simpson_38_rule(y, h):
+    """
+    Regra de Simpson 3/8 (2ª Regra de Simpson / interpolação cúbica de 3º grau):
+    Requer 4 pontos (3 intervalos).
+    Fórmula: (3h / 8) * (y0 + 3*y1 + 3*y2 + y3)
+    """
+    y = np.asarray(y, dtype=float)
     if len(y) != 4:
-        raise ValueError("Simpson 3/8 requer exatamente 4 pontos.")
+        raise ValueError("Simpson 3/8 requer exatamente 4 pontos (3 intervalos).")
     return float((3.0 * h / 8.0) * (y[0] + 3.0 * y[1] + 3.0 * y[2] + y[3]))
 
-def integrate_dataset(x, y):
+
+def integrate_dataset(x, y, label_prefix="Estações"):
+    """
+    Estratégia Combinada Híbrida de Alta Ordem com Auditoria Rastreável Trecho a Trecho:
+    - Intervalos múltiplos de 2: Simpson 1/3 (Pesos 1-4-1 ou 1-4-2-...-4-1)
+    - Intervalos ímpares remanescentes (>= 3): Simpson 3/8 (Pesos 1-3-3-1)
+    - Intervalo unitário remanescente: Regra dos Trapézios (Pesos 1-1)
+    
+    Exemplo de Auditoria Gerada:
+      Estações 0-2: Simpson 1/3
+      Estações 2-5: Simpson 3/8
+      Estações 5-6: Trapézio
+    """
     x, y = np.asarray(x, dtype=float), np.asarray(y, dtype=float)
     n = len(x)
     if n < 2:
-        return 0.0, [{"Trecho": "Nenhum", "Método": "Pontos insuficientes", "Área": 0.0}]
-    if n == 2:
-        area = trapz_rule(x, y)
-        return area, [{"Trecho": f"[{x[0]:.2f}m a {x[1]:.2f}m]", "Método": "Trapézios", "Área": round(area, 4)}]
+        return 0.0, [{"Trecho": "Nenhum", "Método": "Pontos insuficientes", "Fórmula": "-", "Passo (h)": 0.0, "Área": 0.0}]
     
     dx = np.diff(x)
     is_uniform = np.allclose(dx, dx[0], rtol=1e-3)
     h = float(np.mean(dx))
     
-    if not is_uniform:
-        area = trapz_rule(x, y)
-        return area, [{"Trecho": f"[{x[0]:.2f}m a {x[-1]:.2f}m]", "Método": "Trapézios Não-Uniforme", "Área": round(area, 4)}]
+    audit_log = []
+    total_area = 0.0
     
-    audit_log, total_area = [], 0.0
-    intervals, idx = n - 1, 0
+    if not is_uniform:
+        # Se malha não-uniforme, integra por trapézios parciais com auditoria trecho a trecho
+        for i in range(n - 1):
+            sub_x, sub_y = x[i:i+2], y[i:i+2]
+            hi = float(sub_x[1] - sub_x[0])
+            a_seg = float(0.5 * (sub_y[0] + sub_y[1]) * hi)
+            total_area += a_seg
+            audit_log.append({
+                "Trecho": f"{label_prefix} {i}-{i+1} [{sub_x[0]:.2f}m a {sub_x[1]:.2f}m]",
+                "Método": "Trapézio",
+                "Fórmula": f"(h/2) · (y_{{{i}}} + y_{{{i+1}}})",
+                "Passo (h)": f"{hi:.3f} m",
+                "Pesos": "1 - 1",
+                "Ordenadas": f"[{sub_y[0]:.3f}, {sub_y[1]:.3f}]",
+                "Área Parcial": round(a_seg, 4)
+            })
+        return float(total_area), audit_log
+
+    intervals = n - 1
+    idx = 0
     
     while idx < intervals:
         rem = intervals - idx
+        # Se o restante for par, aplica Simpson 1/3 para todo o trecho restante
         if rem % 2 == 0:
             sub_y = y[idx:]
             a = simpson_13_rule(sub_y, h)
             total_area += a
-            audit_log.append({"Trecho": f"Pontos {idx} a {n-1} [{x[idx]:.2f}m a {x[-1]:.2f}m]", "Método": "Simpson 1/3", "Área": round(a, 4)})
+            pesos = "1-4-2-...-4-1" if len(sub_y) > 3 else "1-4-1"
+            audit_log.append({
+                "Trecho": f"{label_prefix} {idx}-{n-1} [{x[idx]:.2f}m a {x[-1]:.2f}m]",
+                "Método": "Simpson 1/3",
+                "Fórmula": f"(h/3) · [y_{{{idx}}} + y_{{{n-1}}} + 4Σy_imp + 2Σy_par]",
+                "Passo (h)": f"{h:.3f} m",
+                "Pesos": pesos,
+                "Ordenadas": f"{len(sub_y)} pts (y[{idx}..{n-1}])",
+                "Área Parcial": round(a, 4)
+            })
             break
+        # Se ímpar e >= 3 intervalos restantes, aplica Simpson 3/8 nos primeiros 3 intervalos
         elif rem >= 3:
             sub_y = y[idx:idx+4]
             a = simpson_38_rule(sub_y, h)
             total_area += a
-            audit_log.append({"Trecho": f"Pontos {idx} a {idx+3} [{x[idx]:.2f}m a {x[idx+3]:.2f}m]", "Método": "Simpson 3/8", "Área": round(a, 4)})
+            audit_log.append({
+                "Trecho": f"{label_prefix} {idx}-{idx+3} [{x[idx]:.2f}m a {x[idx+3]:.2f}m]",
+                "Método": "Simpson 3/8",
+                "Fórmula": f"(3h/8) · [y_{{{idx}}} + 3y_{{{idx+1}}} + 3y_{{{idx+2}}} + y_{{{idx+3}}}]",
+                "Passo (h)": f"{h:.3f} m",
+                "Pesos": "1 - 3 - 3 - 1",
+                "Ordenadas": f"[{sub_y[0]:.3f}, {sub_y[1]:.3f}, {sub_y[2]:.3f}, {sub_y[3]:.3f}]",
+                "Área Parcial": round(a, 4)
+            })
             idx += 3
+        # Se resta apenas 1 intervalo, aplica Regra dos Trapézios
         else:
             sub_x, sub_y = x[idx:idx+2], y[idx:idx+2]
             a = trapz_rule(sub_x, sub_y)
             total_area += a
-            audit_log.append({"Trecho": f"Pontos {idx} a {idx+1} [{x[idx]:.2f}m a {x[idx+1]:.2f}m]", "Método": "Trapézio", "Área": round(a, 4)})
+            audit_log.append({
+                "Trecho": f"{label_prefix} {idx}-{idx+1} [{x[idx]:.2f}m a {x[idx+1]:.2f}m]",
+                "Método": "Trapézio",
+                "Fórmula": f"(h/2) · [y_{{{idx}}} + y_{{{idx+1}}}]",
+                "Passo (h)": f"{h:.3f} m",
+                "Pesos": "1 - 1",
+                "Ordenadas": f"[{sub_y[0]:.3f}, {sub_y[1]:.3f}]",
+                "Área Parcial": round(a, 4)
+            })
             idx += 1
             
     return float(total_area), audit_log
+
+
+def calculate_wsa_panel_mesh(hull, T: float, nx: int = 40, nz: int = 25):
+    """
+    Determinação da Superfície Molhada (WSA) via Discretização Superficial em Painéis 3D:
+    1. Geração dos Pontos 3D (x_i, y_i,k, z_k) na malha de estações e linhas d'água submersas (Z <= T).
+    2. Definição dos Painéis quadriláteros formados por 4 vértices vizinhos.
+    3. Cálculo da Área 3D de cada painel dividindo em 2 triângulos via norma do produto vetorial:
+       Area = 0.5 * ||u x v||
+    4. Soma de todos os painéis submersos para Boreste (+Y) e Bombordo (-Y).
+    """
+    xs = np.linspace(hull.stations_x[0], hull.stations_x[-1], nx)
+    zs = np.linspace(hull.waterlines_z[0], T, nz)
+    
+    # Matriz de nós tridimensionais (Z, X, 3)
+    nodes = np.zeros((nz, nx, 3))
+    for r, z in enumerate(zs):
+        for c, x in enumerate(xs):
+            y = hull.get_y_continuous(x, z)
+            nodes[r, c] = [x, y, z]
+            
+    total_area_sb = 0.0
+    panel_count = 0
+    
+    for r in range(nz - 1):
+        for c in range(nx - 1):
+            p1 = nodes[r, c]         # Vértice inferior esquerdo (x_i, y_i, z_k)
+            p2 = nodes[r, c + 1]     # Vértice inferior direito (x_i+1, y_i+1, z_k)
+            p3 = nodes[r + 1, c + 1] # Vértice superior direito (x_i+1, y_i+1, z_k+1)
+            p4 = nodes[r + 1, c]     # Vértice superior esquerdo (x_i, y_i, z_k+1)
+            
+            # Subdivisão em Triângulo 1 (p1, p2, p4)
+            u1 = p2 - p1
+            v1 = p4 - p1
+            cross1 = np.cross(u1, v1)
+            area1 = 0.5 * float(np.linalg.norm(cross1))
+            
+            # Subdivisão em Triângulo 2 (p2, p3, p4)
+            u2 = p3 - p2
+            v2 = p4 - p2
+            cross2 = np.cross(u2, v2)
+            area2 = 0.5 * float(np.linalg.norm(cross2))
+            
+            total_area_sb += (area1 + area2)
+            panel_count += 1
+            
+    # Ambos os bordos simétricos (Boreste + Bombordo)
+    wsa_total = 2.0 * total_area_sb
+    return wsa_total, panel_count * 2, (nx, nz)
 
 
 # ==============================================================================
@@ -635,13 +759,15 @@ def calculate_hydrostatics_at_draft(hull: Hull, T: float, rho: float = 1.025, t_
     dz = z_grid[1] - z_grid[0] if len(z_grid) > 1 else 0.0
     
     sec_areas, sec_mz, sec_girths = np.zeros(n_st), np.zeros(n_st), np.zeros(n_st)
+    sec_audit_logs = []
     
     for j in range(n_st):
         y_vals = np.array([hull.get_y(j, z) for z in z_grid])
-        half_a, _ = integrate_dataset(z_grid, y_vals)
+        half_a, log_st = integrate_dataset(z_grid, y_vals, label_prefix=f"Z (ST {j:02d})")
         sec_areas[j] = 2.0 * half_a
+        sec_audit_logs.append(log_st)
         
-        half_mz, _ = integrate_dataset(z_grid, z_grid * y_vals)
+        half_mz, _ = integrate_dataset(z_grid, z_grid * y_vals, label_prefix=f"Z·y (ST {j:02d})")
         sec_mz[j] = 2.0 * half_mz
         
         if len(y_vals) > 1 and dz > 0:
@@ -651,27 +777,27 @@ def calculate_hydrostatics_at_draft(hull: Hull, T: float, rho: float = 1.025, t_
 
     # Plano d'água no calado T
     y_wp = np.array([hull.get_y(j, T) for j in range(n_st)])
-    half_awp, log_awp = integrate_dataset(xs, y_wp)
+    half_awp, log_awp = integrate_dataset(xs, y_wp, label_prefix="Estações")
     awp = 2.0 * half_awp
     
-    int_x_2y, _ = integrate_dataset(xs, xs * 2.0 * y_wp)
+    int_x_2y, log_lcf = integrate_dataset(xs, xs * 2.0 * y_wp, label_prefix="Estações")
     lcf = (int_x_2y / awp) if awp > 1e-6 else float(np.mean(xs))
     lcf_mid = lcf - (hull.LBP / 2.0)
     
-    it, log_it = integrate_dataset(xs, (2.0 / 3.0) * (y_wp ** 3))
-    il, log_il = integrate_dataset(xs, 2.0 * ((xs - lcf) ** 2) * y_wp)
+    it, log_it = integrate_dataset(xs, (2.0 / 3.0) * (y_wp ** 3), label_prefix="Estações")
+    il, log_il = integrate_dataset(xs, 2.0 * ((xs - lcf) ** 2) * y_wp, label_prefix="Estações")
     
     # 1. Integração Longitudinal de Volume
-    vol_long, log_vol_long = integrate_dataset(xs, sec_areas)
+    vol_long, log_vol_long = integrate_dataset(xs, sec_areas, label_prefix="Estações")
     
     # 2. Integração Vertical de Volume (Dupla Validação SNU)
     z_steps = np.linspace(hull.waterlines_z[0], T, 20)
     awp_z = []
     for zi in z_steps:
         y_zi = np.array([hull.get_y(j, zi) for j in range(n_st)])
-        h_a, _ = integrate_dataset(xs, y_zi)
+        h_a, _ = integrate_dataset(xs, y_zi, label_prefix="Estações")
         awp_z.append(2.0 * h_a)
-    vol_vert, _ = integrate_dataset(z_steps, np.array(awp_z))
+    vol_vert, log_vol_vert = integrate_dataset(z_steps, np.array(awp_z), label_prefix="Z_WL")
     
     err_vol = abs(vol_long - vol_vert) / vol_long * 100.0 if vol_long > 1e-6 else 0.0
     vol = vol_long
@@ -683,10 +809,10 @@ def calculate_hydrostatics_at_draft(hull: Hull, T: float, rho: float = 1.025, t_
     displ_ext = vol_ext * rho
     
     # Centros de Carena (KB e LCB)
-    int_sec_mz, _ = integrate_dataset(xs, sec_mz)
+    int_sec_mz, log_kb = integrate_dataset(xs, sec_mz, label_prefix="Estações")
     kb = (int_sec_mz / vol) if vol > 1e-6 else 0.5 * T
     
-    int_x_area, log_lcb = integrate_dataset(xs, xs * sec_areas)
+    int_x_area, log_lcb = integrate_dataset(xs, xs * sec_areas, label_prefix="Estações")
     lcb = (int_x_area / vol) if vol > 1e-6 else float(np.mean(xs))
     lcb_mid = lcb - (hull.LBP / 2.0)
     
@@ -702,7 +828,9 @@ def calculate_hydrostatics_at_draft(hull: Hull, T: float, rho: float = 1.025, t_
     mtc = (displ_mld * bml) / (100.0 * hull.LBP) if hull.LBP > 0 else 0.0
     
     # Área Molhada (WSA)
-    wsa, _ = integrate_dataset(xs, sec_girths)
+    wsa_panels, num_panels, mesh_res = calculate_wsa_panel_mesh(hull, T)
+    wsa_girth, log_wsa = integrate_dataset(xs, sec_girths, label_prefix="Estações")
+    wsa = wsa_panels
     
     # Coeficientes Adimensionais
     L, B = hull.LBP, hull.B
@@ -713,6 +841,10 @@ def calculate_hydrostatics_at_draft(hull: Hull, T: float, rho: float = 1.025, t_
     am = sec_areas[mid_idx] if mid_idx < n_st else 0.0
     cm = am / (B * T) if (B * T) > 1e-6 else 0.0
     cp = vol / (am * L) if (am * L) > 1e-6 else 0.0
+    
+    # Fórmulas Empíricas de WSA para auditoria comparativa
+    wsa_denny = L * (cb * B + 1.7 * T) if (L * B * T) > 1e-6 else 0.0
+    wsa_holtrop = L * (2 * T + B) * np.sqrt(max(0.01, cm)) * (0.453 + 0.4425 * cb - 0.2862 * cm - 0.003467 * (B/T if T > 0 else 1) + 0.3696 * cwp) if T > 0 else 0.0
     
     data = {
         "T": T,
@@ -738,19 +870,135 @@ def calculate_hydrostatics_at_draft(hull: Hull, T: float, rho: float = 1.025, t_
         "TPC": tpc,
         "MTC": mtc,
         "WSA": wsa,
+        "WSA_panels": wsa_panels,
+        "WSA_girth": wsa_girth,
+        "WSA_denny": wsa_denny,
+        "WSA_holtrop": wsa_holtrop,
+        "num_panels": num_panels,
+        "mesh_res": mesh_res,
         "CB": cb,
         "CWP": cwp,
         "CM": cm,
         "CP": cp,
+        "AM": am,
         "Erro_Vol": err_vol
     }
     
     audit = {
-        "AWP": {"formula": r"A^{WP} = 2 \int_{0}^{L} y(x, T)\,dx", "data": f"Calado T = {T:.3f} m", "intermediate": f"Meia-área = {half_awp:.3f} m²", "result": f"{awp:.3f}", "unit": "m²", "log": log_awp},
-        "BMt": {"formula": r"BM_t = \frac{I_t}{\nabla}", "data": f"It = {it:.3f} m⁴ | ∇ = {vol:.3f} m³", "intermediate": f"{it:.3f} / {vol:.3f}", "result": f"{bmt:.3f}", "unit": "m", "log": log_it},
-        "KMt": {"formula": r"KM_t = KB + BM_t", "data": f"KB = {kb:.3f} m | BMt = {bmt:.3f} m", "intermediate": f"{kb:.3f} + {bmt:.3f}", "result": f"{kmt:.3f}", "unit": "m"},
-        "TPC": {"formula": r"TPC = \frac{\rho \cdot A^{WP}}{100}", "data": f"ρ = {rho:.3f} t/m³ | AWP = {awp:.3f} m²", "intermediate": f"({rho:.3f} * {awp:.3f}) / 100", "result": f"{tpc:.3f}", "unit": "t/cm"},
-        "CB": {"formula": r"C_B = \frac{\nabla}{LBP \cdot B \cdot T}", "data": f"∇ = {vol:.3f} m³, L = {L:.2f} m, B = {B:.2f} m, T = {T:.3f} m", "intermediate": f"{vol:.3f} / ({L:.2f} * {B:.2f} * {T:.3f})", "result": f"{cb:.4f}", "unit": "adimensional"}
+        "Volume Moldado (∇)": {
+            "formula": r"\nabla = \int_{0}^{LBP} A(x)\,dx = \int_{0}^{T} A_{wp}(z)\,dz",
+            "data": f"Calado T = {T:.3f} m | LBP = {L:.2f} m | {n_st} Seções Transversais",
+            "intermediate": f"Integração longitudinal das áreas seccionais A_0..A_{n_st-1} = {vol_long:.3f} m³ (Validação vertical via Awp(z) = {vol_vert:.3f} m³, Dif = {err_vol:.4f}%)",
+            "result": f"{vol_mld:.3f}", "unit": "m³", "log": log_vol_long
+        },
+        "Deslocamento Moldado (Δ)": {
+            "formula": r"\Delta = \nabla \cdot \rho",
+            "data": f"Volume ∇ = {vol_mld:.3f} m³ | Densidade da Água ρ = {rho:.3f} t/m³",
+            "intermediate": f"{vol_mld:.3f} m³ · {rho:.3f} t/m³ = {displ_mld:.3f} t",
+            "result": f"{displ_mld:.3f}", "unit": "t"
+        },
+        "Área do Plano de Flutuação (AWP)": {
+            "formula": r"A_{wp} = 2 \int_{0}^{LBP} y(x, T)\,dx",
+            "data": f"Calado T = {T:.3f} m | LBP = {L:.2f} m | {n_st} Semi-bocas na Linha d'Água",
+            "intermediate": f"2 · (Meia-Área = {half_awp:.3f} m²) = {awp:.3f} m²",
+            "result": f"{awp:.3f}", "unit": "m²", "log": log_awp
+        },
+        "Centro Vertical de Carena (KB / VCB)": {
+            "formula": r"KB = \frac{M_z}{\nabla} = \frac{\int_{0}^{LBP} M_{z,sec}(x)\,dx}{\nabla}",
+            "data": f"Momento Vertical Total Mz = {int_sec_mz:.3f} m⁴ | Volume ∇ = {vol:.3f} m³",
+            "intermediate": f"{int_sec_mz:.3f} m⁴ / {vol:.3f} m³ = {kb:.3f} m",
+            "result": f"{kb:.3f}", "unit": "m", "log": log_kb
+        },
+        "Centro Longitudinal de Carena (LCB)": {
+            "formula": r"LCB = \frac{M_x}{\nabla} = \frac{\int_{0}^{LBP} x \cdot A(x)\,dx}{\nabla}",
+            "data": f"Momento Longitudinal Total Mx = {int_x_area:.3f} m⁴ | Volume ∇ = {vol:.3f} m³",
+            "intermediate": f"{int_x_area:.3f} m⁴ / {vol:.3f} m³ = {lcb:.3f} m da Popa (PR) → {lcb_mid:+.3f} m da Meia-Nau",
+            "result": f"{lcb:.3f}", "unit": "m", "log": log_lcb
+        },
+        "Centro Longitudinal de Flutuação (LCF)": {
+            "formula": r"LCF = \frac{\int_{0}^{LBP} x \cdot 2y(x, T)\,dx}{A_{wp}}",
+            "data": f"Momento Estático da Linha d'Água = {int_x_2y:.3f} m³ | AWP = {awp:.3f} m²",
+            "intermediate": f"{int_x_2y:.3f} m³ / {awp:.3f} m² = {lcf:.3f} m da Popa (PR) → {lcf_mid:+.3f} m da Meia-Nau",
+            "result": f"{lcf:.3f}", "unit": "m", "log": log_lcf
+        },
+        "Momento de Inércia Transversal (It)": {
+            "formula": r"I_t = \frac{2}{3} \int_{0}^{LBP} [y(x, T)]^3\,dx",
+            "data": f"Calado T = {T:.3f} m | LBP = {L:.2f} m | Integração das Semi-bocas ao cubo",
+            "intermediate": f"(2/3) · ∫ y(x, T)³ dx = {it:.3f} m⁴",
+            "result": f"{it:.3f}", "unit": "m⁴", "log": log_it
+        },
+        "Momento de Inércia Longitudinal (Il)": {
+            "formula": r"I_l = 2 \int_{0}^{LBP} (x - LCF)^2 \cdot y(x, T)\,dx",
+            "data": f"LCF = {lcf:.3f} m | LBP = {L:.2f} m | Calado T = {T:.3f} m",
+            "intermediate": f"2 · ∫ (x - {lcf:.3f})² · y(x, T) dx = {il:.3f} m⁴",
+            "result": f"{il:.3f}", "unit": "m⁴", "log": log_il
+        },
+        "Raio Metacêntrico Transversal (BMt)": {
+            "formula": r"BM_t = \frac{I_t}{\nabla}",
+            "data": f"It = {it:.3f} m⁴ | Volume ∇ = {vol:.3f} m³",
+            "intermediate": f"{it:.3f} / {vol:.3f} = {bmt:.3f} m",
+            "result": f"{bmt:.3f}", "unit": "m"
+        },
+        "Altura Metacêntrica Transversal (KMt)": {
+            "formula": r"KM_t = KB + BM_t",
+            "data": f"KB = {kb:.3f} m | BMt = {bmt:.3f} m",
+            "intermediate": f"{kb:.3f} + {bmt:.3f} = {kmt:.3f} m",
+            "result": f"{kmt:.3f}", "unit": "m"
+        },
+        "Raio Metacêntrico Longitudinal (BMl)": {
+            "formula": r"BM_l = \frac{I_l}{\nabla}",
+            "data": f"Il = {il:.3f} m⁴ | Volume ∇ = {vol:.3f} m³",
+            "intermediate": f"{il:.3f} / {vol:.3f} = {bml:.3f} m",
+            "result": f"{bml:.3f}", "unit": "m"
+        },
+        "Altura Metacêntrica Longitudinal (KMl)": {
+            "formula": r"KM_l = KB + BM_l",
+            "data": f"KB = {kb:.3f} m | BMl = {bml:.3f} m",
+            "intermediate": f"{kb:.3f} + {bml:.3f} = {kml:.3f} m",
+            "result": f"{kml:.3f}", "unit": "m"
+        },
+        "Superfície Molhada (WSA)": {
+            "formula": r"WSA = 2 \sum_{k} \sum_{i} \text{Área}_{\text{painel 3D}}(i, k) \approx \int_{0}^{LBP} G(x)\,dx",
+            "data": f"Discretização 3D: {num_panels} painéis ({mesh_res[0]}x{mesh_res[1]}) | Calado T = {T:.3f} m | LBP = {L:.2f} m",
+            "intermediate": f"Painéis 3D = {wsa_panels:.3f} m² | Integração Perímetros Girth = {wsa_girth:.3f} m² | Denny-Mumford = {wsa_denny:.3f} m² | Holtrop = {wsa_holtrop:.3f} m²",
+            "result": f"{wsa_panels:.3f}", "unit": "m²", "log": log_wsa
+        },
+        "Toneladas por Centímetro de Imersão (TPC)": {
+            "formula": r"TPC = \frac{\rho \cdot A_{wp}}{100}",
+            "data": f"ρ = {rho:.3f} t/m³ | AWP = {awp:.3f} m²",
+            "intermediate": f"({rho:.3f} · {awp:.3f}) / 100 = {tpc:.3f} t/cm",
+            "result": f"{tpc:.3f}", "unit": "t/cm"
+        },
+        "Momento para Alterar Compasso em 1 cm (MTC)": {
+            "formula": r"MTC = \frac{\Delta \cdot BM_l}{100 \cdot LBP}",
+            "data": f"Δ = {displ_mld:.3f} t | BMl = {bml:.3f} m | LBP = {L:.2f} m",
+            "intermediate": f"({displ_mld:.3f} · {bml:.3f}) / (100 · {L:.2f}) = {mtc:.3f} t·m/cm",
+            "result": f"{mtc:.3f}", "unit": "t·m/cm"
+        },
+        "Coeficiente de Bloco (CB)": {
+            "formula": r"C_B = \frac{\nabla}{LBP \cdot B \cdot T}",
+            "data": f"∇ = {vol:.3f} m³, LBP = {L:.2f} m, B = {B:.2f} m, T = {T:.3f} m",
+            "intermediate": f"{vol:.3f} / ({L:.2f} · {B:.2f} · {T:.3f}) = {cb:.4f}",
+            "result": f"{cb:.4f}", "unit": "adimensional"
+        },
+        "Coeficiente Prismático (CP)": {
+            "formula": r"C_P = \frac{\nabla}{A_m \cdot LBP}",
+            "data": f"∇ = {vol:.3f} m³, Am (Meia-Nau) = {am:.3f} m², LBP = {L:.2f} m",
+            "intermediate": f"{vol:.3f} / ({am:.3f} · {L:.2f}) = {cp:.4f}",
+            "result": f"{cp:.4f}", "unit": "adimensional"
+        },
+        "Coeficiente do Plano de Flutuação (CWP)": {
+            "formula": r"C_{WP} = \frac{A_{wp}}{LBP \cdot B}",
+            "data": f"AWP = {awp:.3f} m², LBP = {L:.2f} m, B = {B:.2f} m",
+            "intermediate": f"{awp:.3f} / ({L:.2f} · {B:.2f}) = {cwp:.4f}",
+            "result": f"{cwp:.4f}", "unit": "adimensional"
+        },
+        "Coeficiente de Seção Mestra (CM)": {
+            "formula": r"C_M = \frac{A_m}{B \cdot T}",
+            "data": f"Am = {am:.3f} m², B = {B:.2f} m, T = {T:.3f} m",
+            "intermediate": f"{am:.3f} / ({B:.2f} · {T:.3f}) = {cm:.4f}",
+            "result": f"{cm:.4f}", "unit": "adimensional"
+        }
     }
     
     return data, audit, sec_areas
@@ -1470,32 +1718,13 @@ else:
         st.divider()
         
         # ----------------------------------------------------------------------
-        # CASCO 3D (EM CONTAINER COMPLETO ABAIXO DO PLANO 2D)
+        # CASCO 3D (LEVE, ULTRA-RÁPIDO E FLUIDO)
         # ----------------------------------------------------------------------
-        col_3d_title, col_3d_t1, col_3d_t2, col_3d_t3 = st.columns([3, 2, 2, 2])
-        with col_3d_title:
-            st.markdown("#### 🌐 Casco Tridimensional (3D Mesh Suave)")
-        with col_3d_t1:
-            show_3d_buttocks = st.toggle(
-                "📐 Linhas do Alto 3D",
-                value=True,
-                help="Ativa/desativa os cortes verticais do Plano de Linhas do Alto sobre a superfície 3D."
-            )
-        with col_3d_t2:
-            show_3d_waterlines = st.toggle(
-                "🌊 Linhas d'Água 3D",
-                value=True,
-                help="Ativa/desativa as Linhas d'Água longitudinais coladas na casca 3D (abaixo do calado ativo)."
-            )
-        with col_3d_t3:
-            show_3d_keel = st.toggle(
-                "⚪ Quilha & Proa 3D",
-                value=True,
-                help="Ativa/desativa a linha da Quilha e Roda de Proa (Y=0) no modelo 3D."
-            )
+        st.markdown("#### 🌐 Casco Tridimensional (Superfície Suave 3D)")
+        st.caption("Visualização tridimensional fluida do casco com plano da água no calado analisado.")
 
-        xs_3d = np.linspace(hull.stations_x[0], hull.stations_x[-1], 50)
-        zs_3d = np.linspace(hull.waterlines_z[0], hull.D, 35)
+        xs_3d = np.linspace(hull.stations_x[0], hull.stations_x[-1], 35)
+        zs_3d = np.linspace(hull.waterlines_z[0], hull.D, 25)
         
         x_mesh, z_mesh = np.meshgrid(xs_3d, zs_3d)
         y_mesh = np.zeros_like(x_mesh)
@@ -1505,182 +1734,28 @@ else:
                 y_mesh[r, c] = hull.get_y_continuous(x_mesh[r, c], z_mesh[r, c])
             
         fig_3d = go.Figure()
-        # Casco translúcido
-        fig_3d.add_trace(go.Surface(x=x_mesh, y=y_mesh, z=z_mesh, colorscale='Viridis', opacity=0.70, showscale=False, name="Boreste (+Y)"))
-        fig_3d.add_trace(go.Surface(x=x_mesh, y=-y_mesh, z=z_mesh, colorscale='Viridis', opacity=0.70, showscale=False, name="Bombordo (-Y)"))
+        # Casco translúcido Boreste (+Y) e Bombordo (-Y)
+        fig_3d.add_trace(go.Surface(x=x_mesh, y=y_mesh, z=z_mesh, colorscale='Viridis', opacity=0.75, showscale=False, name="Boreste (+Y)"))
+        fig_3d.add_trace(go.Surface(x=x_mesh, y=-y_mesh, z=z_mesh, colorscale='Viridis', opacity=0.75, showscale=False, name="Bombordo (-Y)"))
         
-        xs_dense_3d = np.linspace(hull.stations_x[0], hull.stations_x[-1], 150)
-        x_mid_3d = float(hull.stations_x[len(hull.stations_x) // 2])
-        x_end_3d = float(hull.stations_x[-1])
-        d_nom_3d = float(hull.D)
-        
-        # 1. Linhas do Alto em 3D (Modelo Real da Tabela de Cotas)
-        if show_3d_buttocks:
-            cuts_specs_3d = [
-                {"name": "Corte I (Y = 0.15 B)", "frac": 0.15, "color": "#f43f5e"},
-                {"name": "Corte II (Y = 0.32 B)", "frac": 0.32, "color": "#fb923c"},
-                {"name": "Corte III (Y = 0.50 B)", "frac": 0.50, "color": "#facc15"},
-                {"name": "Corte IV (Y = 0.70 B)", "frac": 0.70, "color": "#22c55e"},
-                {"name": "Corte V (Y = 0.88 B)", "frac": 0.88, "color": "#38bdf8"}
-            ]
-            zs_scan_3d = np.linspace(0.0, d_nom_3d, 80)
-            for cut in cuts_specs_3d:
-                yc = (hull.B / 2.0) * cut["frac"]
-                pts_x_3d, pts_y_3d, pts_z_3d = [], [], []
-                for x in xs_dense_3d:
-                    y_profile = np.array([hull.get_y_continuous(x, z) for z in zs_scan_3d])
-                    if np.max(y_profile) < yc:
-                        continue
-                    z_found = float(np.interp(yc, y_profile, zs_scan_3d))
-                    y_val = float(hull.get_y_continuous(x, z_found))
-                    pts_x_3d.append(x)
-                    pts_y_3d.append(y_val)
-                    pts_z_3d.append(z_found)
-
-                if len(pts_x_3d) >= 2:
-                    # Boreste (+Y)
-                    fig_3d.add_trace(go.Scatter3d(
-                        x=pts_x_3d, y=pts_y_3d, z=pts_z_3d,
-                        mode='lines', line=dict(color=cut["color"], width=5.5),
-                        name=f"3D: Linha do Alto {cut['name']}"
-                    ))
-                    # Bombordo (-Y)
-                    fig_3d.add_trace(go.Scatter3d(
-                        x=pts_x_3d, y=[-y for y in pts_y_3d], z=pts_z_3d,
-                        mode='lines', line=dict(color=cut["color"], width=5.5),
-                        showlegend=False
-                    ))
-
-        # 2. Linhas d'Água Longitudinais em 3D (Modelo Linear / Escoamento da Carena Submersa até o Calado T)
-        if show_3d_waterlines:
-            flow_specs_3d = [
-                {"name": "Linha Longitudinal I (Y = 0.15 B)", "frac": 0.15, "exp_bow": 4.20, "exp_stern": 1.90, "color": "#f43f5e"},
-                {"name": "Linha Longitudinal II (Y = 0.32 B)", "frac": 0.32, "exp_bow": 3.40, "exp_stern": 1.85, "color": "#fb923c"},
-                {"name": "Linha Longitudinal III (Y = 0.50 B)", "frac": 0.50, "exp_bow": 2.70, "exp_stern": 1.80, "color": "#facc15"},
-                {"name": "Linha Longitudinal IV (Y = 0.70 B)", "frac": 0.70, "exp_bow": 2.05, "exp_stern": 1.75, "color": "#22c55e"},
-                {"name": "Linha Longitudinal V (Y = 0.88 B)", "frac": 0.88, "exp_bow": 1.45, "exp_stern": 1.70, "color": "#38bdf8"}
-            ]
-
-            for flow in flow_specs_3d:
-                yc = (hull.B / 2.0) * flow["frac"]
-                col_m = [hull.get_y(len(hull.stations_x) // 2, wz) for wz in hull.waterlines_z]
-                z_min_3d = float(np.interp(yc, col_m, hull.waterlines_z)) if np.max(col_m) >= yc else float(viz_draft * (0.10 + 0.65 * flow["frac"]))
-                z_min_3d = min(viz_draft * 0.92, z_min_3d)
-
-                col_p = [hull.get_y(0, wz) for wz in hull.waterlines_z]
-                z_stern_3d = float(np.interp(yc, col_p, hull.waterlines_z)) if np.max(col_p) >= yc else float(min(viz_draft, z_min_3d + 0.25 + 0.30 * flow["frac"]))
-                z_stern_3d = min(viz_draft, max(z_min_3d, z_stern_3d))
-
-                exp_b = flow["exp_bow"]
-                exp_s = flow["exp_stern"]
-
-                pts_x_3d, pts_y_3d, pts_z_3d = [], [], []
-                for x in xs_dense_3d:
-                    if x >= x_mid_3d:
-                        t = (x - x_mid_3d) / (x_end_3d - x_mid_3d)
-                        z_val = z_min_3d + (viz_draft - z_min_3d) * (t ** exp_b)
-                    else:
-                        t = (x_mid_3d - x) / x_mid_3d
-                        z_val = z_min_3d + (z_stern_3d - z_min_3d) * (t ** exp_s)
-
-                    z_val = min(viz_draft, z_val)
-                    y_val = float(hull.get_y_continuous(x, z_val))
-                    pts_x_3d.append(x)
-                    pts_y_3d.append(y_val)
-                    pts_z_3d.append(z_val)
-
-                fig_3d.add_trace(go.Scatter3d(
-                    x=pts_x_3d, y=pts_y_3d, z=pts_z_3d,
-                    mode='lines', line=dict(color=flow["color"], width=5.5),
-                    name=f"3D: {flow['name']}"
-                ))
-                fig_3d.add_trace(go.Scatter3d(
-                    x=pts_x_3d, y=[-y for y in pts_y_3d], z=pts_z_3d,
-                    mode='lines', line=dict(color=flow["color"], width=5.5),
-                    showlegend=False
-                ))
-
-            # Linha d'Água Ativa no Calado T em 3D (Linha de Flutuação onde a água bate no casco)
-            pts_x_t, pts_y_t, pts_z_t = [], [], []
-            for x in xs_dense_3d:
-                y = float(hull.get_y_continuous(x, viz_draft))
-                if y > 0.001:
-                    pts_x_t.append(x)
-                    pts_y_t.append(y)
-                    pts_z_t.append(viz_draft)
-
-            if len(pts_x_t) >= 2:
-                fig_3d.add_trace(go.Scatter3d(
-                    x=pts_x_t, y=pts_y_t, z=pts_z_t,
-                    mode='lines', line=dict(color="#00f5d4", width=7.0),
-                    name=f"3D: ★ Linha d'Água no Calado T={viz_draft:.2f}m"
-                ))
-                fig_3d.add_trace(go.Scatter3d(
-                    x=pts_x_t, y=[-y for y in pts_y_t], z=pts_z_t,
-                    mode='lines', line=dict(color="#00f5d4", width=7.0),
-                    showlegend=False
-                ))
-
-        # 3. Quilha e Roda de Proa em 3D (Y = 0 — Opcional via Toggle)
-        if show_3d_keel:
-            keel_stem_3d_x = [float(hull.stations_x[0]), float(hull.stations_x[len(hull.stations_x)//2])]
-            keel_stem_3d_z = [0.0, 0.0]
-            for k in range(1, len(hull.waterlines_z)):
-                row_k = [hull.get_y(j, hull.waterlines_z[k]) for j in range(len(hull.stations_x))]
-                pos_idx = np.where(np.array(row_k) > 0.001)[0]
-                if len(pos_idx) > 0 and pos_idx[-1] < len(hull.stations_x) - 1:
-                    li = pos_idx[-1]
-                    ya, yb = row_k[li], row_k[li + 1]
-                    xk = float(hull.stations_x[li] + (hull.stations_x[li + 1] - hull.stations_x[li]) * (ya / (ya - yb + 1e-9)))
-                else:
-                    xk = float(hull.stations_x[-1])
-                keel_stem_3d_x.append(xk)
-                keel_stem_3d_z.append(float(hull.waterlines_z[k]))
-                
-            keel_stem_3d_x.append(float(hull.stations_x[-1]))
-            keel_stem_3d_z.append(float(hull.D))
-            
-            keel_stem_3d_x = np.array(keel_stem_3d_x)
-            keel_stem_3d_z = np.array(keel_stem_3d_z)
-            s_i = np.argsort(keel_stem_3d_x)
-            keel_stem_3d_x, keel_stem_3d_z = keel_stem_3d_x[s_i], keel_stem_3d_z[s_i]
-            _, u_i = np.unique(keel_stem_3d_x, return_index=True)
-            keel_stem_3d_x, keel_stem_3d_z = keel_stem_3d_x[u_i], keel_stem_3d_z[u_i]
-            
-            if len(keel_stem_3d_x) >= 3:
-                pchip_stem_3d = PchipInterpolator(keel_stem_3d_x, keel_stem_3d_z)
-                k3d_x = np.linspace(keel_stem_3d_x[0], keel_stem_3d_x[-1], 100)
-                k3d_z = np.maximum(0.0, np.minimum(float(hull.D), pchip_stem_3d(k3d_x)))
-            else:
-                k3d_x = keel_stem_3d_x
-                k3d_z = keel_stem_3d_z
-
-            fig_3d.add_trace(go.Scatter3d(
-                x=k3d_x, y=[0.0]*len(k3d_x), z=k3d_z,
-                mode='lines', line=dict(color="#ffffff", width=7.0),
-                name="3D: Roda de Proa & Quilha (Y=0)"
-            ))
-
-
-
-        # Plano da Água Flutuante
-        xp, yp = np.meshgrid(np.linspace(hull.stations_x[0], hull.stations_x[-1], 8), np.linspace(-hull.B/2, hull.B/2, 8))
+        # Plano da Água Flutuante no Calado T
+        xp, yp = np.meshgrid(np.linspace(hull.stations_x[0], hull.stations_x[-1], 6), np.linspace(-hull.B/2, hull.B/2, 6))
         zp = np.full_like(xp, viz_draft)
         fig_3d.add_trace(go.Surface(
             x=xp, y=yp, z=zp,
-            colorscale=[[0, 'rgba(0, 245, 212, 0.40)'], [1, 'rgba(0, 245, 212, 0.40)']],
+            colorscale=[[0, 'rgba(0, 245, 212, 0.45)'], [1, 'rgba(0, 245, 212, 0.45)']],
             showscale=False, name=f"Plano da Água (T={viz_draft:.2f}m)"
         ))
         
         fig_3d.update_layout(
-            title=f"Casco 3D Integrado com as 10 Linhas d'Água e Cortes Navais: {st.session_state.ship_name}",
+            title=f"Casco 3D Suave — {st.session_state.ship_name} (Calado T = {viz_draft:.2f}m)",
             scene=dict(
                 xaxis_title="X (m) [Longitudinal]",
                 yaxis_title="Y (m) [Transversal]",
                 zaxis_title="Z (m) [Vertical]",
                 aspectmode='data'
             ),
-            template="plotly_dark", height=560, margin=dict(l=10, r=10, t=40, b=10)
+            template="plotly_dark", height=520, margin=dict(l=10, r=10, t=40, b=10)
         )
         st.plotly_chart(fig_3d, use_container_width=True)
 
@@ -1702,9 +1777,20 @@ else:
 
     # 3. CÁLCULO & AUDITORIA
     elif st.session_state.selected_module == "🧮 Cálculo & Auditoria":
-        st.subheader("🧮 Painel Hidrostático por Calado & Memória de Cálculo")
-        sel_t = st.slider("Selecione o Calado para Análise (m):", min_value=0.1, max_value=float(hull.D), value=float(hull.Td), step=0.05)
+        st.subheader("🧮 Painel Hidrostático por Calado & Memória de Cálculo Completa")
         
+        col_t_sel, col_t_info = st.columns([2, 3])
+        with col_t_sel:
+            sel_t = st.slider("Selecione o Calado para Análise T (m):", min_value=0.05, max_value=float(hull.D), value=float(hull.Td), step=0.05)
+        with col_t_info:
+            st.markdown(f"""
+            <div style="background: rgba(28, 37, 65, 0.7); border: 1px solid #3a506b; border-radius: 8px; padding: 10px 16px; margin-top: 5px;">
+                <span style="color:#48cae4; font-weight:700;">Calado Analisado:</span> <b>{sel_t:.2f} m</b> &nbsp;|&nbsp;
+                <span style="color:#48cae4; font-weight:700;">Calado de Projeto (Td):</span> <b>{hull.Td:.2f} m</b> &nbsp;|&nbsp;
+                <span style="color:#48cae4; font-weight:700;">Pontal (D):</span> <b>{hull.D:.2f} m</b>
+            </div>
+            """, unsafe_allow_html=True)
+            
         data_t, audit_t, sec_areas = calculate_hydrostatics_at_draft(hull, sel_t, st.session_state.density)
         
         # Validação Cruzada de Dupla Integração (Padrão Seoul National University)
@@ -1714,64 +1800,231 @@ else:
         else:
             st.info(f"ℹ️ Dupla Integração: Diferença entre integração longitudinal e vertical = {err_vol:.3f}%")
 
-        st.markdown("#### 1. Resumo de Propriedades Calculadas")
-        k1, k2, k3, k4 = st.columns(4)
-        k1.metric("Volume Moldado (∇mld)", f"{data_t['Volume_mld']:.2f} m³")
-        k2.metric("Deslocamento Moldado (Δmld)", f"{data_t['Displacement_mld']:.2f} t")
-        k3.metric("Volume Extrapolado (∇ext)", f"{data_t['Volume_ext']:.2f} m³")
-        k4.metric("Deslocamento Extrapolado (Δext)", f"{data_t['Displacement_ext']:.2f} t")
-        
-        st.write("")
-        k5, k6, k7, k8 = st.columns(4)
-        k5.metric("Centro Vertical (KB / VCB)", f"{data_t['KB']:.3f} m")
-        k6.metric("Centro Long. da Popa (LCB)", f"{data_t['LCB']:.3f} m")
-        k6_b = f"{data_t['LCB_mid']:+.3f} m"
-        k7.metric("LCB da Meia-Nau", k6_b)
-        k8.metric("Área Plano (AWP)", f"{data_t['AWP']:.2f} m²")
+        # Sub-abas de Cálculo e Auditoria
+        tab_resumo, tab_sac, tab_wsa, tab_auditoria = st.tabs([
+            "📊 Resumo das Propriedades",
+            "📈 Curva de Áreas Seccionais (A = A(x))",
+            "🌊 Superfície Molhada (WSA - Painéis 3D)",
+            "🔍 Auditoria Matemática de Resultados"
+        ])
 
-        st.write("")
-        k9, k10, k11, k12 = st.columns(4)
-        k9.metric("Centro Flutuação (LCF)", f"{data_t['LCF']:.3f} m")
-        k10.metric("LCF da Meia-Nau", f"{data_t['LCF_mid']:+.3f} m")
-        k11.metric("Raio Transv. (BMt)", f"{data_t['BMt']:.3f} m")
-        k12.metric("Altura Transv. (KMt)", f"{data_t['KMt']:.3f} m")
+        # ----------------------------------------------------------------------
+        # ABA 1: RESUMO DAS PROPRIEDADES HIDROSTÁTICAS
+        # ----------------------------------------------------------------------
+        with tab_resumo:
+            st.markdown("#### 1. Resumo de Propriedades Calculadas")
+            k1, k2, k3, k4 = st.columns(4)
+            k1.metric("Volume Moldado (∇mld)", f"{data_t['Volume_mld']:.2f} m³")
+            k2.metric("Deslocamento Moldado (Δmld)", f"{data_t['Displacement_mld']:.2f} t")
+            k3.metric("Volume Extrapolado (∇ext)", f"{data_t['Volume_ext']:.2f} m³")
+            k4.metric("Deslocamento Extrapolado (Δext)", f"{data_t['Displacement_ext']:.2f} t")
+            
+            st.write("")
+            k5, k6, k7, k8 = st.columns(4)
+            k5.metric("Centro Vertical (KB / VCB)", f"{data_t['KB']:.3f} m")
+            k6.metric("Centro Long. da Popa (LCB)", f"{data_t['LCB']:.3f} m")
+            k7.metric("LCB da Meia-Nau", f"{data_t['LCB_mid']:+.3f} m")
+            k8.metric("Área do Plano (AWP)", f"{data_t['AWP']:.2f} m²")
 
-        st.write("")
-        k13, k14, k15, k16 = st.columns(4)
-        k13.metric("Raio Long. (BMl)", f"{data_t['BMl']:.2f} m")
-        k14.metric("Altura Long. (KMl)", f"{data_t['KMl']:.2f} m")
-        k15.metric("TPC (t/cm)", f"{data_t['TPC']:.3f} t/cm")
-        k16.metric("MTC (t·m/cm)", f"{data_t['MTC']:.2f} t·m/cm")
+            st.write("")
+            k9, k10, k11, k12 = st.columns(4)
+            k9.metric("Centro Flutuação (LCF)", f"{data_t['LCF']:.3f} m")
+            k10.metric("LCF da Meia-Nau", f"{data_t['LCF_mid']:+.3f} m")
+            k11.metric("Raio Transv. (BMt)", f"{data_t['BMt']:.3f} m")
+            k12.metric("Altura Transv. (KMt)", f"{data_t['KMt']:.3f} m")
 
-        st.write("")
-        k17, k18, k19, k20 = st.columns(4)
-        k17.metric("Coef. Bloco (CB)", f"{data_t['CB']:.4f}")
-        k18.metric("Coef. Flutuação (CWP)", f"{data_t['CWP']:.4f}")
-        k19.metric("Coef. Meia-Nau (CM)", f"{data_t['CM']:.4f}")
-        k20.metric("Coef. Prismático (CP)", f"{data_t['CP']:.4f}")
+            st.write("")
+            k13, k14, k15, k16 = st.columns(4)
+            k13.metric("Raio Long. (BMl)", f"{data_t['BMl']:.2f} m")
+            k14.metric("Altura Long. (KMl)", f"{data_t['KMl']:.2f} m")
+            k15.metric("TPC (t/cm)", f"{data_t['TPC']:.3f} t/cm")
+            k16.metric("MTC (t·m/cm)", f"{data_t['MTC']:.2f} t·m/cm")
 
-        st.divider()
-        st.markdown("### 🔍 Função Obrigatória: MOSTRAR CÁLCULO (Auditoria)")
-        st.caption("Conforme Item 22 do Edital: Rastreie a origem matemática, fórmula e dados usados.")
-        
-        prop_sel = st.selectbox("Selecione a Propriedade para Auditar:", options=list(audit_t.keys()))
-        info = audit_t[prop_sel]
-        
-        st.markdown(f"""
-        <div class="audit-box">
-            <h4 style="margin-top:0; color:#48cae4;">📐 Memória de Cálculo: <b>{prop_sel}</b> (Calado T = {sel_t:.3f} m)</h4>
-            <p style="font-weight:700; margin-bottom:4px;">1. Formulação Matemática:</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        st.latex(info["formula"])
-        st.markdown(f"**2. Dados de Entrada:** {info['data']}")
-        st.markdown(f"**3. Substituição e Valores Intermediários:** {info['intermediate']}")
-        st.markdown(f"**4. Resultado Final Calculado:** `{info['result']} {info['unit']}`")
-        
-        if "log" in info:
-            with st.expander("🔬 Métodos Numéricos por Trecho (Simpson 1/3, 3/8 e Trapézios)", expanded=True):
+            st.write("")
+            k17, k18, k19, k20 = st.columns(4)
+            k17.metric("Coef. Bloco (CB)", f"{data_t['CB']:.4f}")
+            k18.metric("Coef. Flutuação (CWP)", f"{data_t['CWP']:.4f}")
+            k19.metric("Coef. Meia-Nau (CM)", f"{data_t['CM']:.4f}")
+            k20.metric("Coef. Prismático (CP)", f"{data_t['CP']:.4f}")
+
+        # ----------------------------------------------------------------------
+        # ABA 2: CURVA DE ÁREAS SECCIONAIS (SAC / A = A(x)) E TABELA DE BALIZAS
+        # ----------------------------------------------------------------------
+        with tab_sac:
+            st.markdown("### 📈 Curva de Áreas Seccionais — SAC ($A = A(x)$)")
+            st.caption(f"Distribuição longitudinal das áreas submersas das seções transversais para o calado ativo **T = {sel_t:.2f} m**.")
+
+            # Tabela de Consulta de A0, A1, ..., An
+            st.markdown("#### 📋 Consulta Individual de Áreas Seccionais ($A_0, A_1, \\dots, A_n$):")
+            
+            sac_records = []
+            for j, st_x in enumerate(hull.stations_x):
+                y_wl_j = float(hull.get_y(j, sel_t))
+                a_j = float(sec_areas[j])
+                c_sec = (a_j / (2.0 * y_wl_j * sel_t)) if (y_wl_j * sel_t) > 1e-4 else 0.0
+                sac_records.append({
+                    "Estação": f"ST {j:02d}",
+                    "Posição X (m)": round(st_x, 4),
+                    "Semi-Boca na WL y(X, T) (m)": round(y_wl_j, 4),
+                    "Boca na WL 2y (m)": round(2.0 * y_wl_j, 4),
+                    "Área Seccional A(x) (m²)": round(a_j, 4),
+                    "Coef. Seccional (Cx)": round(c_sec, 4)
+                })
+            df_sac = pd.DataFrame(sac_records)
+            st.dataframe(df_sac, use_container_width=True)
+
+            # Gráfico Plotly da Curva de Áreas Seccionais
+            xs_sac_dense = np.linspace(hull.stations_x[0], hull.stations_x[-1], 150)
+            if len(hull.stations_x) >= 3:
+                pchip_sac = PchipInterpolator(hull.stations_x, sec_areas)
+                as_dense = np.maximum(0.0, pchip_sac(xs_sac_dense))
+            else:
+                as_dense = np.interp(xs_sac_dense, hull.stations_x, sec_areas)
+
+            fig_sac = go.Figure()
+
+            # Área sombreada sob a curva SAC (Área sob SAC = Volume ∇)
+            fig_sac.add_trace(go.Scatter(
+                x=xs_sac_dense, y=as_dense, mode='lines',
+                fill='tozeroy', fillcolor='rgba(72, 202, 228, 0.18)',
+                line=dict(color='#48cae4', width=3.2),
+                name=f"Curva de Áreas Seccionais A(x) [∇ = {data_t['Volume_mld']:.2f} m³]"
+            ))
+
+            # Marcadores das Estações Discretas (A0, A1, ..., An)
+            fig_sac.add_trace(go.Scatter(
+                x=hull.stations_x, y=sec_areas, mode='markers+text',
+                marker=dict(color='#fca311', size=9, symbol='diamond'),
+                text=[f"A{j}={a:.2f}" for j, a in enumerate(sec_areas)],
+                textposition="top center",
+                name="Balizas Discretas (A₀, A₁, ..., Aₙ)"
+            ))
+
+            # Linha da Seção Mestra / Meia-Nau
+            mid_idx = len(hull.stations_x) // 2
+            x_mid = hull.stations_x[mid_idx]
+            a_mid = sec_areas[mid_idx]
+            fig_sac.add_vline(
+                x=x_mid, line_dash="dash", line_color="#fb923c", line_width=2.0,
+                annotation_text=f"Meia-Nau (Am = {a_mid:.2f} m²)", annotation_position="top left"
+            )
+
+            # Linha do LCB
+            fig_sac.add_vline(
+                x=data_t["LCB"], line_dash="dot", line_color="#22c55e", line_width=2.2,
+                annotation_text=f"LCB = {data_t['LCB']:.2f} m", annotation_position="bottom right"
+            )
+
+            fig_sac.update_layout(
+                title=f"Curva de Áreas Seccionais (SAC) — {st.session_state.ship_name} (Calado T = {sel_t:.2f} m)",
+                xaxis_title="Posição Longitudinal X (m) [PR (Popa) → PV (Proa)]",
+                yaxis_title="Área Seccional Submersa A(x) (m²)",
+                template="plotly_dark", height=480,
+                margin=dict(l=25, r=25, t=45, b=25),
+                legend=dict(orientation="h", yanchor="bottom", y=-0.35, xanchor="center", x=0.5)
+            )
+            st.plotly_chart(fig_sac, use_container_width=True)
+
+            # Memória da Integração Longitudinal do Volume a partir da SAC
+            st.markdown("#### 🔬 Auditoria da Integração do Volume através da Curva SAC (∇ = ∫ A(x) dx):")
+            st.dataframe(pd.DataFrame(audit_t["Volume Moldado (∇)"]["log"]), use_container_width=True)
+
+        # ----------------------------------------------------------------------
+        # ABA 3: SUPERFÍCIE MOLHADA (WSA) — DISCRETIZAÇÃO EM PAINÉIS 3D
+        # ----------------------------------------------------------------------
+        with tab_wsa:
+            st.markdown("### 🌊 Determinação e Metodologia da Superfície Molhada ($WSA$)")
+            st.caption("Cálculo exato da área de contato casco-água através de discretização em painéis tridimensionais e integração de contornos.")
+
+            col_wsa1, col_wsa2, col_wsa3, col_wsa4 = st.columns(4)
+            col_wsa1.metric("WSA (Painéis 3D)", f"{data_t['WSA_panels']:.2f} m²")
+            col_wsa2.metric("WSA (Meios-Perímetros Girth)", f"{data_t['WSA_girth']:.2f} m²")
+            col_wsa3.metric("Denny-Mumford (Empírico)", f"{data_t['WSA_denny']:.2f} m²")
+            col_wsa4.metric("Holtrop (Semi-Empírico)", f"{data_t['WSA_holtrop']:.2f} m²")
+
+            st.divider()
+            st.markdown("#### 📐 Descrição Teórica e Metodologia de Cálculo Adotada:")
+            
+            st.markdown(r"""
+            Para a determinação rigorosa da **Superfície Molhada ($WSA$ — Wetted Surface Area)**, o aplicativo implementa o método de **Discretização Superficial em Painéis Tridimensionais (3D Panel Mesh)** na carena submersa ($Z \le T$):
+
+            ---
+
+            ##### 1. Geração dos Pontos 3D na Superfície da Carena
+            A geometria contínua do casco é mapeada em uma malha de $N_x \times N_z$ nós no espaço tridimensional $\mathbb{R}^3$:
+            $$P(i, k) = \Big(x_i,\; y(x_i, z_k),\; z_k\Big) \quad \text{para } x_i \in [0, LBP] \text{ e } z_k \in [0, T]$$
+            Onde $y(x_i, z_k)$ é obtido através da interpolação suave PCHIP a partir da Tabela de Cotas.
+
+            ---
+
+            ##### 2. Definição dos Painéis Quadriláteros Submersos
+            Cada célula $(i, k)$ da malha forma um painel quadrilátero definido por 4 vértices adjacentes:
+            - $P_1 = (x_i, y_{i, k}, z_k)$ — Vértice inferior esquerdo
+            - $P_2 = (x_{i+1}, y_{i+1, k}, z_k)$ — Vértice inferior direito
+            - $P_3 = (x_{i+1}, y_{i+1, k+1}, z_{k+1})$ — Vértice superior direito
+            - $P_4 = (x_i, y_{i, k+1}, z_{k+1})$ — Vértice superior esquerdo
+
+            ---
+
+            ##### 3. Cálculo da Área Tridimensional de Cada Painel via Produto Vetorial
+            Como os 4 vértices no espaço podem não ser perfeitamente coplanares devido à curvatura do casco, cada painel é dividido em dois triângulos $\triangle_1 (P_1, P_2, P_4)$ e $\triangle_2 (P_2, P_3, P_4)$.  
+            A área 3D de cada triângulo é calculada rigorosamente pela metade da norma do produto vetorial dos seus vetores diretores:
+            $$\vec{u}_1 = P_2 - P_1, \quad \vec{v}_1 = P_4 - P_1 \implies \text{Área}(\triangle_1) = \frac{1}{2} \|\vec{u}_1 \times \vec{v}_1\|$$
+            $$\vec{u}_2 = P_3 - P_2, \quad \vec{v}_2 = P_4 - P_2 \implies \text{Área}(\triangle_2) = \frac{1}{2} \|\vec{u}_2 \times \vec{v}_2\|$$
+            $$\text{Área}_{\text{painel}}(i, k) = \text{Área}(\triangle_1) + \text{Área}(\triangle_2)$$
+
+            ---
+
+            ##### 4. Soma de Todas as Áreas Submersas
+            A superfície molhada total $WSA$ é calculada somando as áreas de todos os painéis submersos para ambos os bordos simétricos (Boreste $+Y$ e Bombordo $-Y$):
+            $$WSA = 2 \cdot \sum_{k=0}^{N_z-2} \sum_{i=0}^{N_x-2} \text{Área}_{\text{painel}}(i, k)$$
+            """)
+
+            st.info(f"💡 **Parâmetros da Malha Atual:** {data_t['num_panels']} painéis 3D gerados na carena ({data_t['mesh_res'][0]} divisões longitudinais $\\times$ {data_t['mesh_res'][1]} divisões verticais).")
+
+        # ----------------------------------------------------------------------
+        # ABA 4: AUDITORIA MATEMÁTICA OBRIGATÓRIA (ITEM 22 DO EDITAL)
+        # ----------------------------------------------------------------------
+        with tab_auditoria:
+            st.markdown("### 🔍 Função Obrigatória de Auditoria de Resultados")
+            st.caption("Rastreamento completo da formulação matemática, dados de entrada, substituição numérica, métodos de integração e resultado final.")
+
+            # Bloco Exemplar Clássico Exigido
+            st.markdown(f"""
+            <div class="audit-box">
+                <h4 style="margin-top:0; color:#48cae4;">📋 Rastreamento Exemplar de Estabilidade Inicial (Calado T = {sel_t:.2f} m):</h4>
+                <pre style="background: rgba(10, 17, 40, 0.9); color: #00f5d4; font-size: 0.98rem; padding: 12px; border-radius: 6px; border: 1px solid #3a506b;">
+Calado = {sel_t:.2f} m
+Volume = {data_t['Volume_mld']:.2f} m³
+It = {data_t['It']:.2f} m⁴
+BMt = It / Volume = {data_t['It']:.2f} / {data_t['Volume_mld']:.2f} = {data_t['BMt']:.3f} m
+KB = {data_t['KB']:.3f} m
+KMt = KB + BMt = {data_t['KB']:.3f} + {data_t['BMt']:.3f} = {data_t['KMt']:.3f} m
+                </pre>
+            </div>
+            """, unsafe_allow_html=True)
+
+            prop_sel = st.selectbox("Selecione a Propriedade Hidrostática para Auditar:", options=list(audit_t.keys()), index=0)
+            info = audit_t[prop_sel]
+            
+            st.markdown(f"""
+            <div class="audit-box">
+                <h4 style="margin-top:0; color:#48cae4;">📐 Memória de Cálculo Detalhada: <b>{prop_sel}</b> (Calado T = {sel_t:.3f} m)</h4>
+                <p style="font-weight:700; color:#94a3b8; margin-bottom:4px;">1. Formulação Matemática:</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            st.latex(info["formula"])
+            st.markdown(f"**2. Dados Utilizados:** `{info['data']}`")
+            st.markdown(f"**3. Substituição e Valores Intermediários Relevantes:** `{info['intermediate']}`")
+            st.markdown(f"**4. Resultado Final Calculado:** `{info['result']} {info['unit']}`")
+            st.markdown(f"**5. Unidade:** `{info['unit']}`")
+            
+            if "log" in info:
+                st.markdown("#### 🔬 Auditoria da Integração Numérica por Trecho:")
+                st.caption("Identificação explícita do método (Simpson 1/3, Simpson 3/8 ou Trapézio) aplicado em cada trecho:")
                 st.dataframe(pd.DataFrame(info["log"]), use_container_width=True)
+
 
     # 4. HYDROSTATIC TABLE
     elif st.session_state.selected_module == "📊 Hydrostatic Table":
