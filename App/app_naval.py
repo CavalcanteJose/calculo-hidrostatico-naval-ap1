@@ -1816,6 +1816,8 @@ else:
                 {"name": "Corte V (Y = 0.88 B)", "frac": 0.88, "color": "#38bdf8"}
             ]
 
+            deck_ys = hull.offsets[-1, :]
+
             for cut in cuts_specs:
                 yc = (hull.B / 2.0) * cut["frac"]
                 st_pts_x, st_pts_z = [], []
@@ -1826,16 +1828,51 @@ else:
                         st_pts_x.append(float(x))
                         st_pts_z.append(z_val)
 
-                if len(st_pts_x) >= 2:
-                    if len(st_pts_x) >= 3:
+                if not st_pts_x:
+                    continue
+
+                # 1. Ponto de Interseção de Vante no Convés (WL 10 / Z = D_nom)
+                bow_st = [j for j in range(len(xs)) if deck_ys[j] >= yc]
+                if len(bow_st) > 0 and bow_st[-1] < len(xs) - 1:
+                    j_last = bow_st[-1]
+                    x1, y1 = float(xs[j_last]), float(deck_ys[j_last])
+                    x2, y2 = float(xs[j_last + 1]), float(deck_ys[j_last + 1])
+                    x_bow_deck = float(x1 + (x2 - x1) * (yc - y1) / (y2 - y1 + 1e-9))
+                else:
+                    x_bow_deck = float(xs[-1])
+
+                # 2. Ponto de Interseção de Ré no Convés (WL 10 / Z = D_nom)
+                stern_st = [j for j in range(len(xs)) if deck_ys[j] >= yc]
+                if len(stern_st) > 0 and stern_st[0] > 0:
+                    j_first = stern_st[0]
+                    x1, y1 = float(xs[j_first - 1]), float(deck_ys[j_first - 1])
+                    x2, y2 = float(xs[j_first]), float(deck_ys[j_first])
+                    x_stern_deck = float(x1 + (x2 - x1) * (yc - y1) / (y2 - y1 + 1e-9))
+                else:
+                    x_stern_deck = float(xs[0])
+
+                # Pontos completos: partindo de WL 10 na popa, percorrendo o casco e subindo até WL 10 na proa
+                all_x = [x_stern_deck] + st_pts_x + [x_bow_deck]
+                all_z = [D_nom] + st_pts_z + [D_nom]
+
+                # Filtra valores estritamente crescentes em X
+                arr_x, arr_z = [], []
+                for px, pz in zip(all_x, all_z):
+                    if len(arr_x) > 0 and px <= arr_x[-1] + 1e-4:
+                        continue
+                    arr_x.append(px)
+                    arr_z.append(pz)
+
+                if len(arr_x) >= 2:
+                    if len(arr_x) >= 3:
                         try:
-                            pchip_cut = PchipInterpolator(st_pts_x, st_pts_z)
-                            sub_x = np.linspace(st_pts_x[0], st_pts_x[-1], 120)
+                            pchip_cut = PchipInterpolator(arr_x, arr_z)
+                            sub_x = np.linspace(arr_x[0], arr_x[-1], 120)
                             sub_z = np.clip(pchip_cut(sub_x), 0.0, D_nom)
                         except Exception:
-                            sub_x, sub_z = st_pts_x, st_pts_z
+                            sub_x, sub_z = arr_x, arr_z
                     else:
-                        sub_x, sub_z = st_pts_x, st_pts_z
+                        sub_x, sub_z = arr_x, arr_z
 
                     fig.add_trace(go.Scatter(
                         x=sub_x, y=sub_z, mode='lines',
@@ -1914,6 +1951,8 @@ else:
                 {"name": "Linha Longitudinal V (Y = 0.88 B)", "frac": 0.88, "color": "#38bdf8"}
             ]
 
+            wl_draft_ys = [hull.get_y_continuous(x, viz_draft) for x in xs]
+
             for flow in flow_specs:
                 yc = (hull.B / 2.0) * flow["frac"]
                 st_pts_x, st_pts_z = [], []
@@ -1921,20 +1960,53 @@ else:
                     col = hull.offsets[:, j]
                     if np.max(col) >= yc:
                         z_val = float(np.interp(yc, col, zs))
-                        if z_val <= viz_draft:
+                        if z_val < viz_draft:
                             st_pts_x.append(float(x))
                             st_pts_z.append(z_val)
 
-                if len(st_pts_x) >= 2:
-                    if len(st_pts_x) >= 3:
+                if not st_pts_x:
+                    continue
+
+                # Interseção de Vante com o plano de água no calado T
+                bow_st = [j for j in range(len(xs)) if wl_draft_ys[j] >= yc]
+                if len(bow_st) > 0 and bow_st[-1] < len(xs) - 1:
+                    j_last = bow_st[-1]
+                    x1, y1 = float(xs[j_last]), float(wl_draft_ys[j_last])
+                    x2, y2 = float(xs[j_last + 1]), float(wl_draft_ys[j_last + 1])
+                    x_bow = float(x1 + (x2 - x1) * (yc - y1) / (y2 - y1 + 1e-9))
+                else:
+                    x_bow = float(xs[-1])
+
+                # Interseção de Ré com o plano de água no calado T
+                stern_st = [j for j in range(len(xs)) if wl_draft_ys[j] >= yc]
+                if len(stern_st) > 0 and stern_st[0] > 0:
+                    j_first = stern_st[0]
+                    x1, y1 = float(xs[j_first - 1]), float(wl_draft_ys[j_first - 1])
+                    x2, y2 = float(xs[j_first]), float(wl_draft_ys[j_first])
+                    x_stern = float(x1 + (x2 - x1) * (yc - y1) / (y2 - y1 + 1e-9))
+                else:
+                    x_stern = float(xs[0])
+
+                all_x = [x_stern] + st_pts_x + [x_bow]
+                all_z = [viz_draft] + st_pts_z + [viz_draft]
+
+                arr_x, arr_z = [], []
+                for px, pz in zip(all_x, all_z):
+                    if len(arr_x) > 0 and px <= arr_x[-1] + 1e-4:
+                        continue
+                    arr_x.append(px)
+                    arr_z.append(pz)
+
+                if len(arr_x) >= 2:
+                    if len(arr_x) >= 3:
                         try:
-                            pchip_cut = PchipInterpolator(st_pts_x, st_pts_z)
-                            sub_x = np.linspace(st_pts_x[0], st_pts_x[-1], 100)
-                            sub_z = np.minimum(viz_draft, pchip_cut(sub_x))
+                            pchip_cut = PchipInterpolator(arr_x, arr_z)
+                            sub_x = np.linspace(arr_x[0], arr_x[-1], 100)
+                            sub_z = np.clip(pchip_cut(sub_x), 0.0, viz_draft)
                         except Exception:
-                            sub_x, sub_z = st_pts_x, st_pts_z
+                            sub_x, sub_z = arr_x, arr_z
                     else:
-                        sub_x, sub_z = st_pts_x, st_pts_z
+                        sub_x, sub_z = arr_x, arr_z
 
                     fig.add_trace(go.Scatter(
                         x=sub_x, y=sub_z, mode='lines',
