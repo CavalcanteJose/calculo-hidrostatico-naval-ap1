@@ -142,37 +142,233 @@ def extract_numeric_value(val, default=0.0):
     return float(match.group(0)) if match else default
 
 
-def _is_body_plan_format(raw_df):
-    """Detecta se é Plano de Linhas com colunas Trans/Vert (não tabela de cotas padrão)."""
-    flat = raw_df.astype(str).values.flatten()
-    keywords = ["trans", "vert", "m-cl", "m-bl", "linhas", "plano", "x(m-ap)"]
-    hits = sum(1 for c in flat if any(k in str(c).lower() for k in keywords))
-    return hits >= 2
+def extract_ship_metadata(raw_df):
+    """Extrai metadados da embarcação (Nome, LBP, Boca, Pontal) se presentes na planilha."""
+    meta = {}
+    for r in range(min(30, raw_df.shape[0])):
+        for c in range(min(15, raw_df.shape[1])):
+            cell_str = str(raw_df.iloc[r, c]).strip().lower()
+            if any(k in cell_str for k in ('nome da embarca', 'embarcação', 'embarcacao', 'navio', 'ship name')):
+                for dc in range(1, 6):
+                    if c + dc < raw_df.shape[1] and pd.notna(raw_df.iloc[r, c + dc]) and str(raw_df.iloc[r, c + dc]).strip() != '':
+                        meta['name'] = str(raw_df.iloc[r, c + dc]).strip()
+                        break
+            if any(k in cell_str for k in ('lpp', 'comprimento', 'lbp', 'ct =', 'ct=')):
+                for dc in range(1, 3):
+                    if c + dc < raw_df.shape[1]:
+                        v = extract_numeric_value(raw_df.iloc[r, c + dc], None)
+                        if v and v > 0:
+                            meta['lbp'] = v
+                            break
+            if cell_str in ('b =', 'b=', 'boca =', 'boca', 'beam =', 'beam'):
+                for dc in range(1, 3):
+                    if c + dc < raw_df.shape[1]:
+                        v = extract_numeric_value(raw_df.iloc[r, c + dc], None)
+                        if v and v > 0:
+                            meta['beam'] = v
+                            break
+            if cell_str in ('p =', 'p=', 'pontal =', 'pontal', 'd =', 'd=', 'depth =', 'depth'):
+                for dc in range(1, 3):
+                    if c + dc < raw_df.shape[1]:
+                        v = extract_numeric_value(raw_df.iloc[r, c + dc], None)
+                        if v and v > 0:
+                            meta['depth'] = v
+                            break
+    return meta
+
+
+def sanitize_offset_table(df):
+    """
+    Higieniza a Tabela de Cotas para garantir:
+      - Índice (Z) e Colunas (X) numéricos do tipo float
+      - ZERO colunas duplicadas e ZERO linhas duplicadas (evita erro fatal no PyArrow)
+      - Ordenação estritamente crescente
+      - Sem valores NaN ou nulos
+      - Conversão automática de mm para m se necessário
+    """
+    if df is None or df.empty:
+        return None
+
+    # Converte rótulos para float limpo
+    new_index = []
+    for i, z in enumerate(df.index):
+        zv = extract_numeric_value(z, None)
+        new_index.append(float(zv) if zv is not None else float(i))
+    new_cols = []
+    for j, x in enumerate(df.columns):
+        xv = extract_numeric_value(x, None)
+        new_cols.append(float(xv) if xv is not None else float(j))
+
+    df.index = new_index
+    df.columns = new_cols
+
+    # Elimina colunas duplicadas calculando a média das colunas repetidas
+    if df.columns.duplicated().any():
+        df = df.T.groupby(level=0).mean().T
+
+    # Elimina linhas duplicadas calculando a média das linhas repetidas
+    if df.index.duplicated().any():
+        df = df.groupby(level=0).mean()
+
+    # Ordena linhas e colunas
+    df = df.sort_index(axis=0).sort_index(axis=1)
+    df = df.fillna(0.0)
+
+    # Conversão automática mm → m se valores são de ordem de grandeza milimétrica
+    if df.values.max() > 80:
+        df = df / 1000.0
+        if df.columns[-1] > 1000:
+            df.columns = [c / 1000.0 for c in df.columns]
+        if df.index[-1] > 100:
+            df.index = [i / 1000.0 for i in df.index]
+
+    df.index.name = "Z_WL (m)"
+    df.columns.name = "Estações X (m)"
+    return df
+
+
+def try_parse_multi_station_blocks(raw_df):
+    """
+    Parser para planilhas com seções transversais dispostas em blocos de (Y, Z) por estação X.
+    Exemplo: 'CURVAS ELOHIM II.xlsx', tabelas com 'X (m)' seguido de 'm-CL' / 'm-BL' ou 'Trans' / 'Vert'.
+    """
+    station_pts = {}
+    for r in range(raw_df.shape[0]):
+        for c in range(raw_df.shape[1]):
+            cell = str(raw_df.iloc[r, c]).strip().lower()
+            if cell in ('x (m)', 'x', 'x(m-ap)', 'x (m-ap)', 'dist x (m)') or 'x (m)' in cell or 'x(m' in cell:
+                # Busca estações à direita na linha r
+                for sc in range(c + 1, raw_df.shape[1]):
+                    xv = raw_df.iloc[r, sc]
+                    if pd.notna(xv) and (isinstance(xv, (int, float)) or (isinstance(xv, str) and re.match(r'^\s*[-+]?\d', str(xv).strip()))):
+                        x_val = extract_numeric_value(xv)
+                        y_col = sc
+                        z_col = sc + 1 if sc + 1 < raw_df.shape[1] else None
+                        if z_col is not None:
+                            header_text = ' '.join(
+                                str(raw_df.iloc[hr, sc]).lower() + ' ' + str(raw_df.iloc[hr, z_col]).lower()
+                                for hr in range(r, min(raw_df.shape[0], r + 4))
+                            )
+                            is_z_first = ('m-bl' in str(raw_df.iloc[r + 3 if r + 3 < raw_df.shape[0] else r, sc]).lower()) or \
+                                         ('vert' in header_text and 'trans' not in str(raw_df.iloc[r + 1, sc]).lower())
+
+                            pts = []
+                            for dr in range(r + 3, min(raw_df.shape[0], r + 30)):
+                                y_raw = raw_df.iloc[dr, y_col]
+                                z_raw = raw_df.iloc[dr, z_col]
+                                if pd.isna(y_raw) and pd.isna(z_raw):
+                                    break
+                                y_v = extract_numeric_value(y_raw, None)
+                                z_v = extract_numeric_value(z_raw, None)
+                                if y_v is not None and z_v is not None:
+                                    if is_z_first:
+                                        pts.append((z_v, y_v))
+                                    else:
+                                        pts.append((y_v, z_v))
+                            if pts:
+                                if x_val not in station_pts:
+                                    station_pts[x_val] = pts
+                                else:
+                                    station_pts[x_val].extend(pts)
+
+    if len(station_pts) < 3:
+        return None
+
+    # Mapeia os pontos de cada estação numa grade uniforme de Linhas d'Água (11 níveis)
+    all_z = [p[1] for pts in station_pts.values() for p in pts]
+    z_min, z_max = min(all_z), max(all_z)
+    z_grid = np.linspace(z_min, z_max, 11)
+    x_sorted = sorted(station_pts.keys())
+
+    matrix = np.zeros((len(z_grid), len(x_sorted)))
+    for j, x_m in enumerate(x_sorted):
+        pts = sorted(station_pts[x_m], key=lambda p: p[1])
+        z_arr = np.array([p[1] for p in pts])
+        y_arr = np.array([p[0] for p in pts])
+        _, uidx = np.unique(z_arr, return_index=True)
+        z_arr, y_arr = z_arr[uidx], y_arr[uidx]
+        if len(z_arr) >= 2:
+            f = interp1d(z_arr, y_arr, kind='linear', fill_value=(y_arr[0], y_arr[-1]), bounds_error=False)
+            matrix[:, j] = np.maximum(0.0, f(z_grid))
+        elif len(z_arr) == 1:
+            matrix[:, j] = y_arr[0]
+
+    df_res = pd.DataFrame(matrix, index=z_grid, columns=x_sorted)
+    return sanitize_offset_table(df_res)
+
+
+def try_parse_labelled_offset_grid(raw_df):
+    """
+    Parser para matrizes de cotas que possuem rótulos descritivos e linha explícita 'x' e coluna explícita 'z'.
+    Exemplo: 'Plano_de_Linhas_Meias_Bocas.xlsx' (Balizas na linha 0, x na linha 1, WL na col 0, z na col 1).
+    """
+    x_row_idx = None
+    z_col_idx = None
+
+    for r in range(min(6, raw_df.shape[0])):
+        for c in range(min(6, raw_df.shape[1])):
+            cell_v = str(raw_df.iloc[r, c]).strip().lower()
+            if cell_v in ('x', 'x (m)', 'estação x', 'x(m)', 'x(m-ap)'):
+                x_row_idx = r
+                break
+        if x_row_idx is not None:
+            break
+
+    for c in range(min(6, raw_df.shape[1])):
+        for r in range(min(6, raw_df.shape[0])):
+            cell_v = str(raw_df.iloc[r, c]).strip().lower()
+            if cell_v in ('z', 'z (m)', 'cota z', 'wl (m)', 'z(m)'):
+                z_col_idx = c
+                break
+        if z_col_idx is not None:
+            break
+
+    if x_row_idx is not None and z_col_idx is not None:
+        start_c = z_col_idx + 1
+        stations = []
+        valid_cols = []
+        for c in range(start_c, raw_df.shape[1]):
+            val = raw_df.iloc[x_row_idx, c]
+            if pd.notna(val) and str(val).strip() != '':
+                xv = extract_numeric_value(val, None)
+                if xv is not None:
+                    stations.append(xv)
+                    valid_cols.append(c)
+
+        start_r = x_row_idx + 1
+        waterlines = []
+        valid_rows = []
+        for r in range(start_r, raw_df.shape[0]):
+            val = raw_df.iloc[r, z_col_idx]
+            if pd.notna(val) and str(val).strip() != '':
+                zv = extract_numeric_value(val, None)
+                if zv is not None:
+                    waterlines.append(zv)
+                    valid_rows.append(r)
+
+        if len(stations) >= 3 and len(waterlines) >= 3:
+            matrix = np.zeros((len(waterlines), len(stations)), dtype=float)
+            for ri, r in enumerate(valid_rows):
+                for ci, c in enumerate(valid_cols):
+                    matrix[ri, ci] = extract_numeric_value(raw_df.iloc[r, c], 0.0)
+
+            df_res = pd.DataFrame(matrix, index=waterlines, columns=stations)
+            return sanitize_offset_table(df_res)
+
+    return None
 
 
 def parse_body_plan_to_offset_table(raw_df):
     """
     Converte Plano de Linhas (Trans/Vert em mm por estação) em Tabela de Cotas padrão.
-
-    Formato esperado:
-      - Cabeçalho com "X(m-AP)" seguido da posição da estação em mm
-      - 3 colunas por estação: [No., Trans(mm desde CL), Vert(mm desde BL)]
-      - Valores em milímetros
-
-    Retorna DataFrame com:
-      - Índice = Linhas d'Água Z em metros
-      - Colunas = Estações X em metros
-      - Valores = Semi-bocas Y em metros
     """
-    # 1. Localizar posições X das estações no cabeçalho
     station_x_mm = []
     station_x_col = {}
 
     for ci in range(raw_df.shape[1]):
-        for ri in range(min(7, raw_df.shape[0])):
+        for ri in range(min(12, raw_df.shape[0])):
             cell = str(raw_df.iloc[ri, ci]).strip().lower()
-            if re.match(r"x\s*\(m-ap\)", cell):
-                # Valor da estação na próxima coluna (mesma linha ou próxima)
+            if re.match(r"x\s*\(m-ap\)", cell) or cell in ('x(m-ap)', 'x (m-ap)'):
                 for di in [1, 0]:
                     if ci + di < raw_df.shape[1]:
                         xv = extract_numeric_value(raw_df.iloc[ri, ci + di], default=None)
@@ -182,13 +378,11 @@ def parse_body_plan_to_offset_table(raw_df):
                                 station_x_col[xv] = ci + di
                             break
 
-    # Fallback: busca números grandes seguidos de "Trans" na linha seguinte
     if not station_x_mm:
         for ci in range(raw_df.shape[1]):
-            for ri in range(min(5, raw_df.shape[0])):
+            for ri in range(min(8, raw_df.shape[0])):
                 xv = extract_numeric_value(raw_df.iloc[ri, ci], default=0)
                 if 50 < xv < 50000:
-                    # Verifica se coluna seguinte contém "Trans"
                     if ci + 1 < raw_df.shape[1]:
                         next_col_text = " ".join(
                             str(raw_df.iloc[r, ci + 1]).lower()
@@ -199,27 +393,19 @@ def parse_body_plan_to_offset_table(raw_df):
                             station_x_col[xv] = ci
 
     if not station_x_mm:
-        raise ValueError(
-            "Não foi possível identificar as estações X.\n"
-            "Certifique-se que a planilha contém cabeçalhos 'X(m-AP)' com os valores das estações."
-        )
+        return None
 
-    # 2. Encontrar linha inicial dos dados numéricos
-    data_start_row = 4  # padrão: linha 4 (após título + 3 linhas de cabeçalho)
+    data_start_row = 4
     for ri in range(min(10, raw_df.shape[0])):
         v = str(raw_df.iloc[ri, 0]).strip()
         if v in ('1', '1.0', '1,0'):
             data_start_row = ri
             break
 
-    # 3. Para cada estação, localizar colunas Trans e Vert e extrair pontos
     station_points = {}
-
     for x_mm in station_x_mm:
         x_col = station_x_col[x_mm]
         trans_col = vert_col = None
-
-        # Procura "Trans" e "Vert" nas linhas de cabeçalho próximas a x_col
         search_cols = range(max(0, x_col - 1), min(raw_df.shape[1], x_col + 4))
         for ci in search_cols:
             col_text = " ".join(
@@ -231,7 +417,6 @@ def parse_body_plan_to_offset_table(raw_df):
             if "vert" in col_text and vert_col is None:
                 vert_col = ci
 
-        # Fallback: Trans = x_col+1, Vert = x_col+2
         if trans_col is None:
             trans_col = x_col + 1 if x_col + 1 < raw_df.shape[1] else None
         if vert_col is None:
@@ -245,19 +430,15 @@ def parse_body_plan_to_offset_table(raw_df):
             t = extract_numeric_value(raw_df.iloc[ri, trans_col], default=None)
             v = extract_numeric_value(raw_df.iloc[ri, vert_col], default=None)
             if t is not None and v is not None and t > 0 and v >= 0:
-                points.append((t / 1000.0, v / 1000.0))  # mm → m
+                points.append((t / 1000.0, v / 1000.0))
 
         if points:
             x_m = x_mm / 1000.0
             station_points[x_m] = sorted(points, key=lambda p: p[1])
 
     if not station_points:
-        raise ValueError(
-            "Nenhum ponto (Trans, Vert) válido encontrado.\n"
-            "Verifique se os dados numéricos estão nas colunas corretas."
-        )
+        return None
 
-    # 4. Criar grade de Linhas d'Água e interpolar semi-bocas
     all_z = [v for pts in station_points.values() for (_, v) in pts]
     z_grid = np.linspace(min(all_z), max(all_z), 12)
     x_sorted = sorted(station_points.keys())
@@ -267,40 +448,35 @@ def parse_body_plan_to_offset_table(raw_df):
         pts = station_points[x_m]
         z_arr = np.array([p[1] for p in pts])
         y_arr = np.array([p[0] for p in pts])
-        # Ordenar e remover Z duplicados
         sidx = np.argsort(z_arr)
         z_arr, y_arr = z_arr[sidx], y_arr[sidx]
         _, uidx = np.unique(z_arr, return_index=True)
         z_arr, y_arr = z_arr[uidx], y_arr[uidx]
         if len(z_arr) >= 2:
-            f = interp1d(z_arr, y_arr, kind='linear',
-                         fill_value=(y_arr[0], y_arr[-1]), bounds_error=False)
+            f = interp1d(z_arr, y_arr, kind='linear', fill_value=(y_arr[0], y_arr[-1]), bounds_error=False)
             matrix[:, j] = np.maximum(0, f(z_grid))
 
-    df_result = pd.DataFrame(
-        np.round(matrix, 4),
-        index=np.round(z_grid, 4),
-        columns=np.round(x_sorted, 4)
-    )
-    df_result.index.name = "Z_WL (m)"
-    df_result.columns.name = "Estações X (m)"
-    return df_result
+    df_result = pd.DataFrame(matrix, index=z_grid, columns=x_sorted)
+    return sanitize_offset_table(df_result)
 
 
 def smart_parse_offset_table(uploaded_file):
     """
-    Parser universal: detecta automaticamente o formato da planilha.
-      - Formato A: Tabela de Cotas padrão (Z × X com semi-bocas Y)
-      - Formato B: Plano de Linhas (Trans/Vert em mm por estação)
+    Parser universal de alta compatibilidade para planilhas navais:
+      - Suporta Planilhas com blocos de coordenadas transversais (ex: 'CURVAS ELOHIM II.xlsx')
+      - Suporta Planos de Linhas com cabeçalhos e rótulos de balizas (ex: 'Plano_de_Linhas_Meias_Bocas.xlsx')
+      - Suporta Planos de Linhas CAD Trans/Vert (mm)
+      - Suporta Tabelas de Cotas convencionais Z × X
+      - Garante ausência total de colunas duplicadas para compatibilidade 100% com Streamlit e PyArrow
     """
-    file_name = uploaded_file.name.lower()
+    file_name = getattr(uploaded_file, "name", "planilha.xlsx").lower()
 
-    # Leitura bruta do arquivo
     if file_name.endswith(".csv"):
         try:
             raw_df = pd.read_csv(uploaded_file, header=None)
         except Exception:
-            uploaded_file.seek(0)
+            if hasattr(uploaded_file, "seek"):
+                uploaded_file.seek(0)
             raw_df = pd.read_csv(uploaded_file, sep=";", header=None)
     else:
         raw_df = pd.read_excel(uploaded_file, header=None)
@@ -310,14 +486,29 @@ def smart_parse_offset_table(uploaded_file):
     if raw_df.empty:
         raise ValueError("A planilha carregada está vazia.")
 
-    # Detecção automática de formato
-    if _is_body_plan_format(raw_df):
-        df_result = parse_body_plan_to_offset_table(raw_df)
+    # Extrai metadados da embarcação se disponíveis
+    meta = extract_ship_metadata(raw_df)
+
+    # 1. Estratégia 1: Blocos de Coordenadas de Estação (ex: CURVAS ELOHIM II)
+    df_result = try_parse_multi_station_blocks(raw_df)
+    if df_result is not None and df_result.shape[0] >= 3 and df_result.shape[1] >= 3:
+        df_result.attrs["meta"] = meta
         return df_result
 
-    # --- Formato A: Tabela de Cotas padrão ---
-    start_row, start_col = 1, 1
+    # 2. Estratégia 2: Matriz com Rótulos e Linha 'x' / Coluna 'z' (ex: Plano_de_Linhas_Meias_Bocas)
+    df_result = try_parse_labelled_offset_grid(raw_df)
+    if df_result is not None and df_result.shape[0] >= 3 and df_result.shape[1] >= 3:
+        df_result.attrs["meta"] = meta
+        return df_result
 
+    # 3. Estratégia 3: Plano de Linhas Trans/Vert em mm
+    df_result = parse_body_plan_to_offset_table(raw_df)
+    if df_result is not None and df_result.shape[0] >= 3 and df_result.shape[1] >= 3:
+        df_result.attrs["meta"] = meta
+        return df_result
+
+    # 4. Estratégia 4: Tabela de Cotas padrão direta (Z × X)
+    start_row, start_col = 1, 1
     col_labels = raw_df.iloc[0, start_col:].values
     stations_x = [extract_numeric_value(v, float(i)) for i, v in enumerate(col_labels)]
 
@@ -330,15 +521,9 @@ def smart_parse_offset_table(uploaded_file):
         for c in range(data_matrix.shape[1]):
             cleaned[r, c] = extract_numeric_value(data_matrix[r, c], 0.0)
 
-    # Conversão automática mm → m quando valores são muito grandes
-    if np.nanmax(cleaned) > 100:
-        cleaned = cleaned / 1000.0
-        stations_x = [x / 1000.0 if x > 100 else x for x in stations_x]
-        waterlines_z = [z / 1000.0 if z > 50 else z for z in waterlines_z]
-
     df_clean = pd.DataFrame(cleaned, index=waterlines_z, columns=stations_x)
-    df_clean.index.name = "Z_WL (m)"
-    df_clean.columns.name = "Estações X (m)"
+    df_clean = sanitize_offset_table(df_clean)
+    df_clean.attrs["meta"] = meta
     return df_clean
 
 
@@ -1159,8 +1344,24 @@ if st.session_state.app_state == "home":
                 try:
                     df_loaded = smart_parse_offset_table(uploaded_file)
                     st.session_state.df_offsets = df_loaded
-                    st.session_state.ship_name = uploaded_file.name.split('.')[0]
-                    st.success(f"✅ Arquivo '{uploaded_file.name}' carregado e processado com sucesso!")
+                    meta_loaded = getattr(df_loaded, "attrs", {}).get("meta", {})
+                    if meta_loaded.get("name"):
+                        st.session_state.ship_name = meta_loaded["name"]
+                    else:
+                        st.session_state.ship_name = uploaded_file.name.split('.')[0]
+
+                    calc_lbp = float(meta_loaded.get("lbp", max(1.0, float(df_loaded.columns[-1]) - float(df_loaded.columns[0]))))
+                    calc_beam = float(meta_loaded.get("beam", max(0.5, float(2.0 * df_loaded.values.max()))))
+                    calc_depth = float(meta_loaded.get("depth", max(0.5, float(df_loaded.index[-1]))))
+                    calc_td = float(meta_loaded.get("draft", max(0.1, float(calc_depth * 0.7))))
+
+                    st.session_state.lbp = calc_lbp
+                    st.session_state.beam = calc_beam
+                    st.session_state.depth = calc_depth
+                    st.session_state.design_draft = calc_td
+                    st.session_state.t_max = float(calc_depth * 0.95)
+
+                    st.success(f"✅ Arquivo '{uploaded_file.name}' ({st.session_state.ship_name}) processado com sucesso! ({len(df_loaded.columns)} Estações × {len(df_loaded.index)} WLs)")
                 except Exception as e:
                     st.error(f"Erro ao processar planilha: {e}")
             else:
@@ -1192,18 +1393,23 @@ if st.session_state.app_state == "home":
         
         df_curr = st.session_state.get("df_offsets", generate_barge_data())
         # Clamp valores para garantir que estejam acima dos mínimos dos widgets
-        calc_lbp = max(1.0, float(df_curr.columns[-1]) - float(df_curr.columns[0]))
-        calc_beam = max(0.5, float(2.0 * df_curr.values.max()))
-        calc_depth = max(0.5, float(df_curr.index[-1]))
-        calc_td = max(0.1, float(calc_depth * 0.7))
+        default_lbp = max(1.0, float(df_curr.columns[-1]) - float(df_curr.columns[0]))
+        default_beam = max(0.5, float(2.0 * df_curr.values.max()))
+        default_depth = max(0.5, float(df_curr.index[-1]))
+        default_td = max(0.1, float(default_depth * 0.7))
+
+        cur_lbp = st.session_state.get("lbp", default_lbp)
+        cur_beam = st.session_state.get("beam", default_beam)
+        cur_depth = st.session_state.get("depth", default_depth)
+        cur_td = st.session_state.get("design_draft", default_td)
         
         col_p1, col_p2 = st.columns(2)
-        st.session_state.lbp = col_p1.number_input("LBP (m)", value=calc_lbp, min_value=1.0, step=1.0)
-        st.session_state.beam = col_p2.number_input("Boca B (m)", value=calc_beam, min_value=0.5, step=0.5)
+        st.session_state.lbp = col_p1.number_input("LBP (m)", value=float(cur_lbp), min_value=1.0, step=1.0)
+        st.session_state.beam = col_p2.number_input("Boca B (m)", value=float(cur_beam), min_value=0.5, step=0.5)
         
         col_p3, col_p4 = st.columns(2)
-        st.session_state.depth = col_p3.number_input("Pontal D (m)", value=calc_depth, min_value=0.5, step=0.5)
-        st.session_state.design_draft = col_p4.number_input("Calado Proj. Td (m)", value=calc_td, min_value=0.1, step=0.1)
+        st.session_state.depth = col_p3.number_input("Pontal D (m)", value=float(cur_depth), min_value=0.5, step=0.5)
+        st.session_state.design_draft = col_p4.number_input("Calado Proj. Td (m)", value=float(cur_td), min_value=0.1, step=0.1)
         
         st.session_state.density = st.number_input("Densidade da Água ρ (t/m³)", value=1.025, min_value=0.5, max_value=1.5, step=0.001, format="%.3f")
         
@@ -1211,7 +1417,7 @@ if st.session_state.app_state == "home":
         st.subheader("📏 Faixa de Calados (Hydrostatic Table)")
         col_f1, col_f2, col_f3 = st.columns(3)
         st.session_state.t_min = col_f1.number_input("T min (m)", value=0.2, min_value=0.05, step=0.1)
-        st.session_state.t_max = col_f2.number_input("T max (m)", value=float(calc_depth * 0.95), min_value=0.1, step=0.1)
+        st.session_state.t_max = col_f2.number_input("T max (m)", value=float(st.session_state.depth * 0.95), min_value=0.1, step=0.1)
         st.session_state.delta_t = col_f3.number_input("ΔT (m)", value=0.2, min_value=0.05, step=0.05)
         
         st.write("")
@@ -1288,7 +1494,21 @@ else:
         st.subheader(f"📋 Tabela de Cotas: {st.session_state.ship_name}")
         st.caption("Matriz de semi-bocas (y em metros). Linhas = Linhas d'Água (Z) | Colunas = Estações (X)")
         
-        st.dataframe(df_offsets.style.format("{:.3f}"), use_container_width=True)
+        # Formatação resiliente para Streamlit e PyArrow garantindo zero duplicação
+        display_df = df_offsets.copy()
+        display_cols = [f"ST {float(c):.2f}m" for c in display_df.columns]
+        seen_cols = {}
+        unique_cols = []
+        for col_name in display_cols:
+            if col_name in seen_cols:
+                seen_cols[col_name] += 1
+                unique_cols.append(f"{col_name} ({seen_cols[col_name]})")
+            else:
+                seen_cols[col_name] = 0
+                unique_cols.append(col_name)
+        display_df.columns = unique_cols
+        display_df.index = [f"WL {float(z):.2f}m" for z in display_df.index]
+        st.dataframe(display_df.style.format("{:.3f}"), use_container_width=True)
         
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Estações (X)", f"{len(hull.stations_x)}")
