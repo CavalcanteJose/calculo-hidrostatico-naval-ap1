@@ -282,16 +282,31 @@ def try_parse_multi_station_blocks(raw_df):
 
     matrix = np.zeros((len(z_grid), len(x_sorted)))
     for j, x_m in enumerate(x_sorted):
-        pts = sorted(station_pts[x_m], key=lambda p: p[1])
-        z_arr = np.array([p[1] for p in pts])
-        y_arr = np.array([p[0] for p in pts])
-        _, uidx = np.unique(z_arr, return_index=True)
-        z_arr, y_arr = z_arr[uidx], y_arr[uidx]
-        if len(z_arr) >= 2:
-            f = interp1d(z_arr, y_arr, kind='linear', fill_value=(y_arr[0], y_arr[-1]), bounds_error=False)
-            matrix[:, j] = np.maximum(0.0, f(z_grid))
-        elif len(z_arr) == 1:
-            matrix[:, j] = y_arr[0]
+        pts = station_pts[x_m]
+        shell_pts = [(y, z) for (y, z) in pts if y > 0]
+        z_bottom = min(p[1] for p in pts)
+        z_deck = max(p[1] for p in pts)
+
+        if shell_pts:
+            shell_pts = sorted(shell_pts, key=lambda p: (p[1], p[0]))
+            z_dict = {}
+            for y, z in shell_pts:
+                z_dict[z] = max(z_dict.get(z, 0.0), y)
+
+            z_shell = np.array(sorted(z_dict.keys()))
+            y_shell = np.array([z_dict[z] for z in z_shell])
+
+            for ri, z_val in enumerate(z_grid):
+                if z_val < z_bottom - 1e-4:
+                    matrix[ri, j] = 0.0
+                elif z_val <= z_deck + 1e-4:
+                    if len(z_shell) >= 2:
+                        y_interp = float(np.interp(z_val, z_shell, y_shell))
+                    else:
+                        y_interp = float(y_shell[0])
+                    matrix[ri, j] = y_interp
+                else:
+                    matrix[ri, j] = float(y_shell[-1])
 
     df_res = pd.DataFrame(matrix, index=z_grid, columns=x_sorted)
     return sanitize_offset_table(df_res)
@@ -489,14 +504,14 @@ def smart_parse_offset_table(uploaded_file):
     # Extrai metadados da embarcação se disponíveis
     meta = extract_ship_metadata(raw_df)
 
-    # 1. Estratégia 1: Blocos de Coordenadas de Estação (ex: CURVAS ELOHIM II)
-    df_result = try_parse_multi_station_blocks(raw_df)
+    # 1. Estratégia 1: Matriz com Rótulos e Linha 'x' / Coluna 'z' (ex: Plano_de_Linhas_Meias_Bocas)
+    df_result = try_parse_labelled_offset_grid(raw_df)
     if df_result is not None and df_result.shape[0] >= 3 and df_result.shape[1] >= 3:
         df_result.attrs["meta"] = meta
         return df_result
 
-    # 2. Estratégia 2: Matriz com Rótulos e Linha 'x' / Coluna 'z' (ex: Plano_de_Linhas_Meias_Bocas)
-    df_result = try_parse_labelled_offset_grid(raw_df)
+    # 2. Estratégia 2: Blocos de Coordenadas de Estação (ex: CURVAS ELOHIM II)
+    df_result = try_parse_multi_station_blocks(raw_df)
     if df_result is not None and df_result.shape[0] >= 3 and df_result.shape[1] >= 3:
         df_result.attrs["meta"] = meta
         return df_result
@@ -1338,17 +1353,77 @@ if st.session_state.app_state == "home":
             index=0
         )
         
+        # Sincronização imediata ao alternar entre os exemplos do site ou upload
+        if "active_origin_choice" not in st.session_state or st.session_state.active_origin_choice != origin_choice:
+            st.session_state.active_origin_choice = origin_choice
+            if origin_choice == "🧱 Barcaça Paralelepipédica (Validação Analítica)":
+                st.session_state.df_offsets = generate_barge_data(20.0, 4.0, 2.0, 11, 6)
+                st.session_state.ship_name = "Barcaça Analítica"
+                st.session_state.lbp = 20.0
+                st.session_state.beam = 4.0
+                st.session_state.depth = 2.0
+                st.session_state.design_draft = 1.4
+                st.session_state.t_min = 0.2
+                st.session_state.t_max = 1.9
+                st.session_state.delta_t = 0.2
+            elif origin_choice == "🚢 Navio Mercante 100m (Exemplo Realista)":
+                st.session_state.df_offsets = generate_sample_ship()
+                st.session_state.ship_name = "Navio Mercante 100m"
+                st.session_state.lbp = 100.0
+                st.session_state.beam = 16.0
+                st.session_state.depth = 10.0
+                st.session_state.design_draft = 6.0
+                st.session_state.t_min = 0.5
+                st.session_state.t_max = 9.5
+                st.session_state.delta_t = 0.5
+            elif origin_choice == "⛵ Navio Real — Tabela de Cotas (11 Balizas × 11 WL)":
+                st.session_state.df_offsets = generate_real_ship()
+                st.session_state.ship_name = "Navio Real (9.11m × 2.40m × 1.06m)"
+                st.session_state.lbp = 9.11
+                st.session_state.beam = 2.40
+                st.session_state.depth = 1.06
+                st.session_state.design_draft = 0.60
+                st.session_state.t_min = 0.1
+                st.session_state.t_max = 1.0
+                st.session_state.delta_t = 0.1
+            elif origin_choice == "⛽ Petroleiro Panamax I (204.78m × 38.0m × 19.0m - EMP)":
+                st.session_state.df_offsets = generate_panamax_ship()
+                st.session_state.ship_name = "Petroleiro Panamax I (204.78m × 38.0m × 19.0m)"
+                st.session_state.lbp = 204.78
+                st.session_state.beam = 38.0
+                st.session_state.depth = 19.0
+                st.session_state.design_draft = 12.0
+                st.session_state.t_min = 1.0
+                st.session_state.t_max = 18.0
+                st.session_state.delta_t = 1.0
+            elif origin_choice == "🛢️ Superpetroleiro 320K VLCC (Seoul National University Benchmark)":
+                st.session_state.df_offsets = generate_vlcc_320k()
+                st.session_state.ship_name = "320K VLCC (320m × 60m × 30m)"
+                st.session_state.lbp = 320.0
+                st.session_state.beam = 60.0
+                st.session_state.depth = 30.0
+                st.session_state.design_draft = 20.8
+                st.session_state.t_min = 2.0
+                st.session_state.t_max = 28.0
+                st.session_state.delta_t = 2.0
+            elif origin_choice == "📁 Fazer Upload de Tabela de Cotas (.xlsx / .csv)":
+                if "uploaded_df_offsets" in st.session_state:
+                    st.session_state.df_offsets = st.session_state.uploaded_df_offsets
+                    st.session_state.ship_name = st.session_state.get("uploaded_ship_name", "Embarcação Carregada")
+        
         if origin_choice == "📁 Fazer Upload de Tabela de Cotas (.xlsx / .csv)":
             uploaded_file = st.file_uploader("Selecione o arquivo com ou sem cabeçalho:", type=["xlsx", "xls", "csv"])
             if uploaded_file is not None:
                 try:
                     df_loaded = smart_parse_offset_table(uploaded_file)
                     st.session_state.df_offsets = df_loaded
+                    st.session_state.uploaded_df_offsets = df_loaded
                     meta_loaded = getattr(df_loaded, "attrs", {}).get("meta", {})
                     if meta_loaded.get("name"):
                         st.session_state.ship_name = meta_loaded["name"]
                     else:
                         st.session_state.ship_name = uploaded_file.name.split('.')[0]
+                    st.session_state.uploaded_ship_name = st.session_state.ship_name
 
                     calc_lbp = float(meta_loaded.get("lbp", max(1.0, float(df_loaded.columns[-1]) - float(df_loaded.columns[0]))))
                     calc_beam = float(meta_loaded.get("beam", max(0.5, float(2.0 * df_loaded.values.max()))))
@@ -1359,31 +1434,14 @@ if st.session_state.app_state == "home":
                     st.session_state.beam = calc_beam
                     st.session_state.depth = calc_depth
                     st.session_state.design_draft = calc_td
+                    st.session_state.t_min = 0.2
                     st.session_state.t_max = float(calc_depth * 0.95)
+                    st.session_state.delta_t = max(0.05, round(calc_depth / 20.0, 2))
 
                     st.success(f"✅ Arquivo '{uploaded_file.name}' ({st.session_state.ship_name}) processado com sucesso! ({len(df_loaded.columns)} Estações × {len(df_loaded.index)} WLs)")
                 except Exception as e:
                     st.error(f"Erro ao processar planilha: {e}")
-            else:
-                st.session_state.df_offsets = generate_barge_data(20.0, 4.0, 2.0, 11, 6)
-                st.session_state.ship_name = "Barcaça Padrão"
-        elif origin_choice == "🚢 Navio Mercante 100m (Exemplo Realista)":
-            st.session_state.df_offsets = generate_sample_ship()
-            st.session_state.ship_name = "Navio Mercante 100m"
-        elif origin_choice == "⛵ Navio Real — Tabela de Cotas (11 Balizas × 11 WL)":
-            st.session_state.df_offsets = generate_real_ship()
-            st.session_state.ship_name = "Navio Real (9.11m × 2.40m × 1.06m)"
-        elif origin_choice == "⛽ Petroleiro Panamax I (204.78m × 38.0m × 19.0m - EMP)":
-            st.session_state.df_offsets = generate_panamax_ship()
-            st.session_state.ship_name = "Petroleiro Panamax I (204.78m × 38.0m × 19.0m)"
-        elif origin_choice == "🛢️ Superpetroleiro 320K VLCC (Seoul National University Benchmark)":
-            st.session_state.df_offsets = generate_vlcc_320k()
-            st.session_state.ship_name = "320K VLCC (320m × 60m × 30m)"
-        else:
-            st.session_state.df_offsets = generate_barge_data(20.0, 4.0, 2.0, 11, 6)
-            st.session_state.ship_name = "Barcaça Analítica"
-
-            
+        
         st.markdown('</div>', unsafe_allow_html=True)
         
     with col_main_right:
@@ -1391,33 +1449,30 @@ if st.session_state.app_state == "home":
         st.subheader("⚙️ 2. Parâmetros da Embarcação")
         st.caption("Verifique as dimensões principais e a densidade da água.")
         
-        df_curr = st.session_state.get("df_offsets", generate_barge_data())
-        # Clamp valores para garantir que estejam acima dos mínimos dos widgets
-        default_lbp = max(1.0, float(df_curr.columns[-1]) - float(df_curr.columns[0]))
-        default_beam = max(0.5, float(2.0 * df_curr.values.max()))
-        default_depth = max(0.5, float(df_curr.index[-1]))
-        default_td = max(0.1, float(default_depth * 0.7))
-
-        cur_lbp = st.session_state.get("lbp", default_lbp)
-        cur_beam = st.session_state.get("beam", default_beam)
-        cur_depth = st.session_state.get("depth", default_depth)
-        cur_td = st.session_state.get("design_draft", default_td)
+        # Garante inicialização com valores padrão se não definidos
+        if "lbp" not in st.session_state: st.session_state.lbp = 20.0
+        if "beam" not in st.session_state: st.session_state.beam = 4.0
+        if "depth" not in st.session_state: st.session_state.depth = 2.0
+        if "design_draft" not in st.session_state: st.session_state.design_draft = 1.4
+        if "t_min" not in st.session_state: st.session_state.t_min = 0.2
+        if "t_max" not in st.session_state: st.session_state.t_max = 1.9
+        if "delta_t" not in st.session_state: st.session_state.delta_t = 0.2
         
         col_p1, col_p2 = st.columns(2)
-        st.session_state.lbp = col_p1.number_input("LBP (m)", value=float(cur_lbp), min_value=1.0, step=1.0)
-        st.session_state.beam = col_p2.number_input("Boca B (m)", value=float(cur_beam), min_value=0.5, step=0.5)
+        st.session_state.lbp = col_p1.number_input("LBP (m)", value=float(st.session_state.lbp), min_value=1.0, step=1.0)
+        st.session_state.beam = col_p2.number_input("Boca B (m)", value=float(st.session_state.beam), min_value=0.5, step=0.5)
         
         col_p3, col_p4 = st.columns(2)
-        st.session_state.depth = col_p3.number_input("Pontal D (m)", value=float(cur_depth), min_value=0.5, step=0.5)
-        st.session_state.design_draft = col_p4.number_input("Calado Proj. Td (m)", value=float(cur_td), min_value=0.1, step=0.1)
+        st.session_state.depth = col_p3.number_input("Pontal D (m)", value=float(st.session_state.depth), min_value=0.5, step=0.5)
+        st.session_state.design_draft = col_p4.number_input("Calado Proj. Td (m)", value=float(st.session_state.design_draft), min_value=0.1, step=0.1)
         
         st.session_state.density = st.number_input("Densidade da Água ρ (t/m³)", value=1.025, min_value=0.5, max_value=1.5, step=0.001, format="%.3f")
         
         st.divider()
         st.subheader("📏 Faixa de Calados (Hydrostatic Table)")
         col_f1, col_f2, col_f3 = st.columns(3)
-        st.session_state.t_min = col_f1.number_input("T min (m)", value=0.2, min_value=0.05, step=0.1)
-        st.session_state.t_max = col_f2.number_input("T max (m)", value=float(st.session_state.depth * 0.95), min_value=0.1, step=0.1)
+        st.session_state.t_min = col_f1.number_input("T min (m)", value=float(st.session_state.t_min), min_value=0.05, step=0.1)
+        st.session_state.t_max = col_f2.number_input("T max (m)", value=float(st.session_state.t_max), min_value=0.1, step=0.1)
         st.session_state.delta_t = col_f3.number_input("ΔT (m)", value=0.2, min_value=0.05, step=0.05)
         
         st.write("")
@@ -1693,48 +1748,19 @@ else:
                     annotation_text=f"WL {k:02d}" if k > 0 else "LB", annotation_position="left"
                 )
 
-            # 2. Roda de Proa & Quilha (Curva contínua que sobe suavemente até o bico do convés em x_end, D_nom)
-            stem_pts_x = [x0, float(xs[len(xs)//2])]
-            stem_pts_z = [0.0, 0.0]
-            
-            # Para cada WL, encontra a posição X onde a roda de proa passa
-            for k in range(1, len(zs)):
-                row_k = [hull.get_y(j, zs[k]) for j in range(len(xs))]
-                pos_idx = np.where(np.array(row_k) > 0.001)[0]
-                if len(pos_idx) > 0 and pos_idx[-1] < len(xs) - 1:
-                    li = pos_idx[-1]
-                    ya, yb = row_k[li], row_k[li + 1]
-                    x_stem_k = float(xs[li] + (xs[li + 1] - xs[li]) * (ya / (ya - yb + 1e-9)))
-                else:
-                    x_stem_k = x_end
-                stem_pts_x.append(x_stem_k)
-                stem_pts_z.append(float(zs[k]))
-            
-            # Garante que o topo da roda de proa toca exatamente o vértice do convés (x_end, D_nom)
-            stem_pts_x.append(x_end)
-            stem_pts_z.append(D_nom)
-            
-            # Ordena e remove duplicatas para interpolação suave
-            stem_pts_x = np.array(stem_pts_x)
-            stem_pts_z = np.array(stem_pts_z)
-            s_idx = np.argsort(stem_pts_x)
-            stem_pts_x, stem_pts_z = stem_pts_x[s_idx], stem_pts_z[s_idx]
-            _, u_idx = np.unique(stem_pts_x, return_index=True)
-            stem_pts_x, stem_pts_z = stem_pts_x[u_idx], stem_pts_z[u_idx]
-            
-            if len(stem_pts_x) >= 3:
-                pchip_stem = PchipInterpolator(stem_pts_x, stem_pts_z)
-                keel_x_dense = np.linspace(stem_pts_x[0], stem_pts_x[-1], 150)
-                keel_z_dense = np.maximum(0.0, np.minimum(D_nom, pchip_stem(keel_x_dense)))
-            else:
-                keel_x_dense = stem_pts_x
-                keel_z_dense = stem_pts_z
+            # 2. Cota de Quilha / Fundo em cada estação (sem cortar proa nem popa)
+            st_bot_z = []
+            for j in range(len(xs)):
+                col = hull.offsets[:, j]
+                pos = np.where(col > 0.001)[0]
+                st_bot_z.append(float(hull.waterlines_z[pos[0]]) if len(pos) > 0 else float(D_nom))
 
-            z_deck_dense = np.full_like(keel_x_dense, D_nom)
+            keel_x_dense = np.linspace(x0, x_end, 180)
+            keel_z_dense = np.interp(keel_x_dense, xs, st_bot_z)
 
-            # 3. Silhueta Lateral do Casco (Preenchimento)
-            sil_x = np.concatenate([keel_x_dense, keel_x_dense[::-1]])
-            sil_z = np.concatenate([keel_z_dense, z_deck_dense[::-1]])
+            # 3. Silhueta Lateral do Casco (Preenchimento contínuo de x0 a x_end)
+            sil_x = np.concatenate([keel_x_dense, [x_end, x0, x0]])
+            sil_z = np.concatenate([keel_z_dense, [D_nom, D_nom, keel_z_dense[0]]])
             fig.add_trace(go.Scatter(
                 x=sil_x, y=sil_z, mode='lines',
                 fill='toself', fillcolor='rgba(59, 130, 246, 0.10)',
@@ -1742,21 +1768,14 @@ else:
                 line=dict(color="#fca311", width=3.0)
             ))
 
-            # 4. Espelho de Popa (PR em X=0)
+            # 4. Linha da Quilha & Roda de Proa (Linha Branca Contínua subindo até o convés)
             fig.add_trace(go.Scatter(
-                x=[x0, x0], y=[0.0, D_nom], mode='lines',
-                name="Espelho de Popa (PR)",
-                line=dict(color="#fca311", width=3.0)
-            ))
-
-            # 5. Linha da Quilha & Roda de Proa (Linha Branca Contínua subindo até o convés)
-            fig.add_trace(go.Scatter(
-                x=keel_x_dense, y=keel_z_dense, mode='lines',
+                x=np.append(keel_x_dense, x_end), y=np.append(keel_z_dense, D_nom), mode='lines',
                 name="Perfil da Quilha & Roda de Proa (Y=0)",
                 line=dict(color="#ffffff", width=3.2)
             ))
 
-            # 6. Linhas do Alto (Plano de Linhas do Alto = Modelo Real / Interseção Pura da Tabela de Cotas)
+            # 5. Linhas do Alto (Plano de Linhas do Alto = Modelo Real / Interseção Pura da Tabela de Cotas)
             cuts_specs = [
                 {"name": "Corte I (Y = 0.15 B)", "frac": 0.15, "color": "#f43f5e"},
                 {"name": "Corte II (Y = 0.32 B)", "frac": 0.32, "color": "#fb923c"},
@@ -1765,7 +1784,7 @@ else:
                 {"name": "Corte V (Y = 0.88 B)", "frac": 0.88, "color": "#38bdf8"}
             ]
 
-            xs_dense = np.linspace(x0, x_end, 150)
+            xs_dense = np.linspace(x0, x_end, 160)
             zs_scan = np.linspace(0.0, D_nom, 80)
             for cut in cuts_specs:
                 yc = (hull.B / 2.0) * cut["frac"]
@@ -1785,7 +1804,7 @@ else:
                         line=dict(color=cut["color"], width=2.6)
                     ))
 
-            # 7. Calado de Análise
+            # 6. Calado de Análise
             fig.add_hline(
                 y=viz_draft, line_dash="dash", line_color="#00f5d4", line_width=2.5,
                 annotation_text=f"Calado T = {viz_draft:.2f}m", annotation_position="bottom right"
@@ -1810,7 +1829,6 @@ else:
             zs = hull.waterlines_z
             x0 = float(xs[0])
             x_end = float(xs[-1])
-            xs_scan = np.linspace(x0, x_end, 200)
 
             # 1. Grid de Referência (Estações em vermelho até o calado T)
             for j, st_x in enumerate(xs):
@@ -1819,48 +1837,30 @@ else:
                     annotation_text=f"ST {j:02d}", annotation_position="top"
                 )
 
-            # 2. Contorno do Casco Submerso / Carena (Abaixo da Linha d'Água no Calado T)
-            keel_x, keel_z = [], []
-            for x in xs_scan:
-                y_at_t = hull.get_y_continuous(x, viz_draft)
-                y_at_mid = hull.get_y_continuous(x, viz_draft * 0.5)
-                if y_at_t < 0.002 and y_at_mid < 0.002:
-                    continue
-                y_wl1 = hull.get_y_continuous(x, zs[1] if len(zs) > 1 else viz_draft * 0.1)
-                y_wl2 = hull.get_y_continuous(x, zs[2] if len(zs) > 2 else viz_draft * 0.2)
-                if y_wl1 < 0.002 and y_wl2 < 0.002:
-                    zs_s = np.linspace(0, viz_draft, 60)
-                    yp = np.array([hull.get_y_continuous(x, z) for z in zs_s])
-                    pos = np.where(yp > 0.002)[0]
-                    z_keel = float(zs_s[pos[0]]) if len(pos) > 0 else 0.0
-                else:
-                    z_keel = 0.0
-                keel_x.append(x)
-                keel_z.append(min(viz_draft, z_keel))
+            # 2. Cota de Quilha / Fundo em cada estação (sem cortar proa nem popa)
+            st_bot_z = []
+            for j in range(len(xs)):
+                col = hull.offsets[:, j]
+                pos = np.where(col > 0.001)[0]
+                st_bot_z.append(float(hull.waterlines_z[pos[0]]) if len(pos) > 0 else float(hull.D))
 
-            if len(keel_x) >= 2:
-                keel_x = np.array(keel_x)
-                keel_z = np.array(keel_z)
-                z_waterline = np.full_like(keel_x, viz_draft)
+            keel_x_dense = np.linspace(x0, x_end, 180)
+            keel_z_dense = np.interp(keel_x_dense, xs, st_bot_z)
+            submersed_keel_z = np.minimum(viz_draft, keel_z_dense)
 
-                sil_x = np.concatenate([keel_x, keel_x[::-1]])
-                sil_z = np.concatenate([keel_z, z_waterline[::-1]])
-                fig.add_trace(go.Scatter(
-                    x=sil_x, y=sil_z, mode='lines',
-                    fill='toself', fillcolor='rgba(59, 130, 246, 0.12)',
-                    name="Perfil Submerso da Carena (Obras Vivas)",
-                    line=dict(color="#fca311", width=2.8)
-                ))
-                fig.add_trace(go.Scatter(
-                    x=[x0, x0], y=[0.0, viz_draft], mode='lines',
-                    name="Espelho de Popa Submerso",
-                    line=dict(color="#fca311", width=2.8), showlegend=False
-                ))
-                fig.add_trace(go.Scatter(
-                    x=keel_x, y=keel_z, mode='lines',
-                    name="Quilha & Roda de Proa Submersa",
-                    line=dict(color="#ffffff", width=2.8)
-                ))
+            sil_x = np.concatenate([keel_x_dense, [x_end, x0, x0]])
+            sil_z = np.concatenate([submersed_keel_z, [viz_draft, viz_draft, submersed_keel_z[0]]])
+            fig.add_trace(go.Scatter(
+                x=sil_x, y=sil_z, mode='lines',
+                fill='toself', fillcolor='rgba(59, 130, 246, 0.12)',
+                name="Perfil Submerso da Carena (Obras Vivas)",
+                line=dict(color="#fca311", width=2.8)
+            ))
+            fig.add_trace(go.Scatter(
+                x=keel_x_dense, y=submersed_keel_z, mode='lines',
+                name="Quilha & Roda de Proa Submersa",
+                line=dict(color="#ffffff", width=2.8)
+            ))
 
             # 3. Linhas de Fluxo Longitudinais (Abaixo da Linha d'Água no Calado T)
             flow_specs = [
@@ -1871,8 +1871,7 @@ else:
                 {"name": "Linha Longitudinal V (Y = 0.88 B)", "frac": 0.88, "exp_bow": 1.45, "exp_stern": 1.70, "color": "#38bdf8"}
             ]
             x_mid = float(xs[len(xs) // 2])
-            x_end_t = float(keel_x[-1]) if len(keel_x) >= 2 else x_end
-            xs_dense = np.linspace(x0, x_end_t, 150)
+            xs_dense = np.linspace(x0, x_end, 150)
 
             for flow in flow_specs:
                 yc = (hull.B / 2.0) * flow["frac"]
@@ -1890,7 +1889,7 @@ else:
                 zs_flow = []
                 for x in xs_dense:
                     if x >= x_mid:
-                        t = (x - x_mid) / max(1e-5, (x_end_t - x_mid))
+                        t = (x - x_mid) / max(1e-5, (x_end - x_mid))
                         z_val = z_min + (viz_draft - z_min) * (t ** exp_bow)
                     else:
                         t = (x_mid - x) / max(1e-5, (x_mid - x0))
@@ -1906,7 +1905,7 @@ else:
 
             # 4. Linha d'Água Ativa no Calado T (Plano Superior da Superfície da Água)
             fig.add_trace(go.Scatter(
-                x=[x0, x_end_t], y=[viz_draft, viz_draft], mode='lines',
+                x=[x0, x_end], y=[viz_draft, viz_draft], mode='lines',
                 name=f"★ Linha d'Água no Calado T = {viz_draft:.2f}m (Linha de Flutuação)",
                 line=dict(color="#00f5d4", width=4.0, dash="solid")
             ))
@@ -1940,11 +1939,22 @@ else:
         # ----------------------------------------------------------------------
         # CASCO 3D (LEVE, ULTRA-RÁPIDO E FLUIDO)
         # ----------------------------------------------------------------------
-        st.markdown("#### 🌐 Casco Tridimensional (Superfície Suave 3D)")
-        st.caption("Visualização tridimensional fluida do casco com plano da água no calado analisado.")
+        col_3d_h, col_3d_opt = st.columns([3, 2])
+        with col_3d_h:
+            st.markdown("#### 🌐 Casco Tridimensional (Superfície Suave 3D)")
+            st.caption("Visualização tridimensional fluida do casco com plano da água no calado analisado.")
+        with col_3d_opt:
+            aspect_choice_3d = st.selectbox(
+                "Escala Visual do Modelo 3D:",
+                [
+                    "📐 Proporção Ajustada (Engenharia Naval - Z Otimizado)",
+                    "📏 Escala Real 1:1 (Geométrica Estrita)"
+                ],
+                index=0
+            )
 
-        xs_3d = np.linspace(hull.stations_x[0], hull.stations_x[-1], 35)
-        zs_3d = np.linspace(hull.waterlines_z[0], hull.D, 25)
+        xs_3d = np.linspace(hull.stations_x[0], hull.stations_x[-1], 40)
+        zs_3d = np.linspace(hull.waterlines_z[0], hull.D, 30)
         
         x_mesh, z_mesh = np.meshgrid(xs_3d, zs_3d)
         y_mesh = np.zeros_like(x_mesh)
@@ -1955,8 +1965,8 @@ else:
             
         fig_3d = go.Figure()
         # Casco translúcido Boreste (+Y) e Bombordo (-Y)
-        fig_3d.add_trace(go.Surface(x=x_mesh, y=y_mesh, z=z_mesh, colorscale='Viridis', opacity=0.75, showscale=False, name="Boreste (+Y)"))
-        fig_3d.add_trace(go.Surface(x=x_mesh, y=-y_mesh, z=z_mesh, colorscale='Viridis', opacity=0.75, showscale=False, name="Bombordo (-Y)"))
+        fig_3d.add_trace(go.Surface(x=x_mesh, y=y_mesh, z=z_mesh, colorscale='Viridis', opacity=0.78, showscale=False, name="Boreste (+Y)"))
+        fig_3d.add_trace(go.Surface(x=x_mesh, y=-y_mesh, z=z_mesh, colorscale='Viridis', opacity=0.78, showscale=False, name="Bombordo (-Y)"))
         
         # Plano da Água Flutuante no Calado T
         xp, yp = np.meshgrid(np.linspace(hull.stations_x[0], hull.stations_x[-1], 6), np.linspace(-hull.B/2, hull.B/2, 6))
@@ -1967,15 +1977,26 @@ else:
             showscale=False, name=f"Plano da Água (T={viz_draft:.2f}m)"
         ))
         
-        fig_3d.update_layout(
-            title=f"Casco 3D Suave — {st.session_state.ship_name} (Calado T = {viz_draft:.2f}m)",
-            scene=dict(
+        if aspect_choice_3d == "📐 Proporção Ajustada (Engenharia Naval - Z Otimizado)":
+            scene_dict = dict(
+                xaxis_title="X (m) [Longitudinal]",
+                yaxis_title="Y (m) [Transversal]",
+                zaxis_title="Z (m) [Vertical]",
+                aspectmode='manual',
+                aspectratio=dict(x=3.4, y=1.2, z=0.8)
+            )
+        else:
+            scene_dict = dict(
                 xaxis_title="X (m) [Longitudinal]",
                 yaxis_title="Y (m) [Transversal]",
                 zaxis_title="Z (m) [Vertical]",
                 aspectmode='data'
-            ),
-            template="plotly_dark", height=520, margin=dict(l=10, r=10, t=40, b=10)
+            )
+        
+        fig_3d.update_layout(
+            title=f"Casco 3D Suave — {st.session_state.ship_name} (Calado T = {viz_draft:.2f}m)",
+            scene=scene_dict,
+            template="plotly_dark", height=540, margin=dict(l=10, r=10, t=40, b=10)
         )
         st.plotly_chart(fig_3d, use_container_width=True)
 
