@@ -1204,6 +1204,28 @@ def calculate_hydrostatics_at_draft(hull: Hull, T: float, rho: float = 1.025, t_
     return data, audit, sec_areas
 
 
+def get_hull_keel_profile(hull: Hull) -> np.ndarray:
+    """
+    Determina a cota Z exata da quilha (linha de centro Y=0) para cada estação longitudinal.
+    Para seções que tocam a linha de base (Z=0, Y=0), a quilha é estritamente 0.0m.
+    Para seções elevadas (abóbada de popa ou roda de proa), calcula a cota Z onde a baliza encontra Y=0.
+    """
+    xs = hull.stations_x
+    wz = hull.waterlines_z
+    keel_pts_z = []
+    for j in range(len(xs)):
+        col = hull.offsets[:, j]
+        pos = np.where(col > 0.001)[0]
+        if len(pos) == 0:
+            kz = float(hull.D)
+        elif pos[0] == 0 or pos[0] == 1:
+            kz = float(wz[0])
+        else:
+            kz = float(wz[pos[0] - 1])
+        keel_pts_z.append(kz)
+    return np.array(keel_pts_z)
+
+
 def export_lines_plan_dxf(hull: Hull, ship_name: str) -> bytes:
     """
     Exporta o Plano de Linhas Naval completo estruturado em camadas para AutoCAD / Rhinoceros (.DXF).
@@ -1378,13 +1400,13 @@ if st.session_state.app_state == "home":
                 st.session_state.delta_t = 0.5
             elif origin_choice == "⛵ Navio Real — Tabela de Cotas (11 Balizas × 11 WL)":
                 st.session_state.df_offsets = generate_real_ship()
-                st.session_state.ship_name = "Navio Real (9.11m × 2.40m × 1.06m)"
+                st.session_state.ship_name = "Navio Real (9.11m × 2.04m × 1.80m)"
                 st.session_state.lbp = 9.11
-                st.session_state.beam = 2.40
-                st.session_state.depth = 1.06
+                st.session_state.beam = 2.04
+                st.session_state.depth = 1.80
                 st.session_state.design_draft = 0.60
                 st.session_state.t_min = 0.1
-                st.session_state.t_max = 1.0
+                st.session_state.t_max = 1.70
                 st.session_state.delta_t = 0.1
             elif origin_choice == "⛽ Petroleiro Panamax I (204.78m × 38.0m × 19.0m - EMP)":
                 st.session_state.df_offsets = generate_panamax_ship()
@@ -1609,29 +1631,47 @@ else:
                 fig.add_hline(y=wz, line_dash="dot", line_color="rgba(148, 163, 184, 0.25)", line_width=1)
                 
             # Eixo de Simetria (Linha de Centro - CL)
-            fig.add_vline(x=0, line_color="#48cae4", line_width=1.8, annotation_text="CL", annotation_position="top")
+            fig.add_vline(x=0, line_color="#48cae4", line_width=2.0, annotation_text="CL", annotation_position="top")
 
             # Balizas de Vante (Proa - Lado Direito +Y)
-            for j in range(mid_idx, len(hull.stations_x)):
+            for j in range(mid_idx + 1, len(hull.stations_x)):
                 x_val = hull.stations_x[j]
-                z_pts = np.linspace(hull.waterlines_z[0], hull.D, 40)
+                z_pts = np.linspace(hull.waterlines_z[0], hull.D, 60)
                 y_pts = [eval_hull_y(x_val, z) for z in z_pts]
-                fig.add_trace(go.Scatter(
-                    x=y_pts, y=z_pts, mode='lines',
-                    name=f"ST {j} (x={x_val:.2f}m - Proa)",
-                    line=dict(width=1.8)
-                ))
+                if np.max(y_pts) > 0.005:
+                    fig.add_trace(go.Scatter(
+                        x=y_pts, y=z_pts, mode='lines',
+                        name=f"ST {j:02d} (x={x_val:.2f}m - Proa)",
+                        line=dict(width=2.0)
+                    ))
+
+            # Baliza de Meia-Nau (ST mid_idx) no centro (desenhada em ambos os bordos)
+            x_mid = hull.stations_x[mid_idx]
+            z_pts = np.linspace(hull.waterlines_z[0], hull.D, 60)
+            y_mid = [eval_hull_y(x_mid, z) for z in z_pts]
+            fig.add_trace(go.Scatter(
+                x=y_mid, y=z_pts, mode='lines',
+                name=f"ST {mid_idx:02d} (x={x_mid:.2f}m - Meia-Nau)",
+                line=dict(color="#00f5d4", width=2.6)
+            ))
+            fig.add_trace(go.Scatter(
+                x=[-y for y in y_mid], y=z_pts, mode='lines',
+                name=f"ST {mid_idx:02d} (Meia-Nau - Ré)",
+                line=dict(color="#00f5d4", width=2.6, dash='dash'),
+                showlegend=False
+            ))
 
             # Balizas de Ré (Popa - Lado Esquerdo -Y)
-            for j in range(0, mid_idx + 1):
+            for j in range(0, mid_idx):
                 x_val = hull.stations_x[j]
-                z_pts = np.linspace(hull.waterlines_z[0], hull.D, 40)
+                z_pts = np.linspace(hull.waterlines_z[0], hull.D, 60)
                 y_pts = [-eval_hull_y(x_val, z) for z in z_pts]
-                fig.add_trace(go.Scatter(
-                    x=y_pts, y=z_pts, mode='lines',
-                    name=f"ST {j} (x={x_val:.2f}m - Popa)",
-                    line=dict(dash='dash' if j < mid_idx else 'solid', width=1.8)
-                ))
+                if np.max(np.abs(y_pts)) > 0.005:
+                    fig.add_trace(go.Scatter(
+                        x=y_pts, y=z_pts, mode='lines',
+                        name=f"ST {j:02d} (x={x_val:.2f}m - Popa)",
+                        line=dict(dash='dash', width=1.8)
+                    ))
 
             # Linha d'Água de Análise
             fig.add_hline(
@@ -1643,8 +1683,9 @@ else:
                 title="Plano de Balizas (Body Plan) — [Esquerda: Popa | Direita: Proa]",
                 xaxis_title="Semi-boca Y (m) [← Bombordo | Boreste →]",
                 yaxis_title="Cota Vertical Z (m) [Linha de Base BL = 0]",
-                template="plotly_dark", height=480, margin=dict(l=20, r=20, t=40, b=20),
-                legend=dict(orientation="h", yanchor="bottom", y=-0.35, xanchor="center", x=0.5)
+                yaxis=dict(range=[-0.02, hull.D + 0.08]),
+                template="plotly_dark", height=490, margin=dict(l=20, r=20, t=40, b=20),
+                legend=dict(orientation="h", yanchor="bottom", y=-0.38, xanchor="center", x=0.5)
             )
             return fig
 
@@ -1732,10 +1773,6 @@ else:
             x_end = float(xs[-1])
             D_nom = float(hull.D)
 
-            # Grade de varredura fina
-            xs_scan = np.linspace(x0, x_end, 180)
-            zs_scan = np.linspace(0.0, D_nom, 100)
-
             # 1. Grid de Referência
             for j, st_x in enumerate(xs):
                 fig.add_vline(
@@ -1748,34 +1785,29 @@ else:
                     annotation_text=f"WL {k:02d}" if k > 0 else "LB", annotation_position="left"
                 )
 
-            # 2. Cota de Quilha / Fundo em cada estação (sem cortar proa nem popa)
-            st_bot_z = []
-            for j in range(len(xs)):
-                col = hull.offsets[:, j]
-                pos = np.where(col > 0.001)[0]
-                st_bot_z.append(float(hull.waterlines_z[pos[0]]) if len(pos) > 0 else float(D_nom))
-
+            # 2. Perfil Real da Quilha e Roda de Proa (Linha de Centro Y=0)
+            st_keel_z = get_hull_keel_profile(hull)
             keel_x_dense = np.linspace(x0, x_end, 180)
-            keel_z_dense = np.interp(keel_x_dense, xs, st_bot_z)
+            keel_z_dense = np.interp(keel_x_dense, xs, st_keel_z)
 
-            # 3. Silhueta Lateral do Casco (Preenchimento contínuo de x0 a x_end)
+            # Silhueta Lateral do Casco (Preenchimento contínuo de x0 a x_end)
             sil_x = np.concatenate([keel_x_dense, [x_end, x0, x0]])
             sil_z = np.concatenate([keel_z_dense, [D_nom, D_nom, keel_z_dense[0]]])
             fig.add_trace(go.Scatter(
                 x=sil_x, y=sil_z, mode='lines',
-                fill='toself', fillcolor='rgba(59, 130, 246, 0.10)',
+                fill='toself', fillcolor='rgba(59, 130, 246, 0.08)',
                 name="Silhueta Lateral do Casco",
-                line=dict(color="#fca311", width=3.0)
+                line=dict(color="#fca311", width=2.8)
             ))
 
-            # 4. Linha da Quilha & Roda de Proa (Linha Branca Contínua subindo até o convés)
+            # Perfil da Quilha & Roda de Proa (Y=0)
             fig.add_trace(go.Scatter(
                 x=np.append(keel_x_dense, x_end), y=np.append(keel_z_dense, D_nom), mode='lines',
                 name="Perfil da Quilha & Roda de Proa (Y=0)",
                 line=dict(color="#ffffff", width=3.2)
             ))
 
-            # 5. Linhas do Alto (Plano de Linhas do Alto = Modelo Real / Interseção Pura da Tabela de Cotas)
+            # 3. Linhas do Alto Verdadeiras (Buttocks da Tabela de Cotas)
             cuts_specs = [
                 {"name": "Corte I (Y = 0.15 B)", "frac": 0.15, "color": "#f43f5e"},
                 {"name": "Corte II (Y = 0.32 B)", "frac": 0.32, "color": "#fb923c"},
@@ -1784,27 +1816,34 @@ else:
                 {"name": "Corte V (Y = 0.88 B)", "frac": 0.88, "color": "#38bdf8"}
             ]
 
-            xs_dense = np.linspace(x0, x_end, 160)
-            zs_scan = np.linspace(0.0, D_nom, 80)
             for cut in cuts_specs:
                 yc = (hull.B / 2.0) * cut["frac"]
-                pts_x, pts_z = [], []
-                for x in xs_dense:
-                    y_profile = np.array([hull.get_y_continuous(x, z) for z in zs_scan])
-                    if np.max(y_profile) < yc:
-                        continue
-                    z_found = float(np.interp(yc, y_profile, zs_scan))
-                    pts_x.append(x)
-                    pts_z.append(z_found)
+                st_pts_x, st_pts_z = [], []
+                for j, x in enumerate(xs):
+                    col = hull.offsets[:, j]
+                    if np.max(col) >= yc:
+                        z_val = float(np.interp(yc, col, zs))
+                        st_pts_x.append(float(x))
+                        st_pts_z.append(z_val)
 
-                if len(pts_x) >= 2:
+                if len(st_pts_x) >= 2:
+                    if len(st_pts_x) >= 3:
+                        try:
+                            pchip_cut = PchipInterpolator(st_pts_x, st_pts_z)
+                            sub_x = np.linspace(st_pts_x[0], st_pts_x[-1], 120)
+                            sub_z = np.clip(pchip_cut(sub_x), 0.0, D_nom)
+                        except Exception:
+                            sub_x, sub_z = st_pts_x, st_pts_z
+                    else:
+                        sub_x, sub_z = st_pts_x, st_pts_z
+
                     fig.add_trace(go.Scatter(
-                        x=pts_x, y=pts_z, mode='lines',
+                        x=sub_x, y=sub_z, mode='lines',
                         name=f"Linha do Alto {cut['name']}",
                         line=dict(color=cut["color"], width=2.6)
                     ))
 
-            # 6. Calado de Análise
+            # 4. Calado de Análise
             fig.add_hline(
                 y=viz_draft, line_dash="dash", line_color="#00f5d4", line_width=2.5,
                 annotation_text=f"Calado T = {viz_draft:.2f}m", annotation_position="bottom right"
@@ -1814,7 +1853,7 @@ else:
                 title="Plano de Linhas do Alto (Sheer / Buttock Plan — Cortes Longitudinais da Tabela de Cotas)",
                 xaxis_title="Comprimento Longitudinal X (m) [PR (Popa) → SM (Meia-Nau) → PV (Proa)]",
                 yaxis_title="Altura Vertical Z (m) a partir da Linha de Base (LB)",
-                yaxis=dict(range=[-0.05, D_nom + 0.15]),
+                yaxis=dict(range=[-0.04, D_nom + 0.12]),
                 template="plotly_dark", height=500, margin=dict(l=25, r=25, t=45, b=25),
                 legend=dict(orientation="h", yanchor="bottom", y=-0.42, xanchor="center", x=0.5)
             )
@@ -1830,24 +1869,28 @@ else:
             x0 = float(xs[0])
             x_end = float(xs[-1])
 
-            # 1. Grid de Referência (Estações em vermelho até o calado T)
+            # 1. Grid de Referência (Estações até o calado T)
             for j, st_x in enumerate(xs):
                 fig.add_vline(
                     x=st_x, line_dash="solid", line_color="rgba(239, 68, 68, 0.35)", line_width=1.0,
                     annotation_text=f"ST {j:02d}", annotation_position="top"
                 )
 
-            # 2. Cota de Quilha / Fundo em cada estação (sem cortar proa nem popa)
-            st_bot_z = []
-            for j in range(len(xs)):
-                col = hull.offsets[:, j]
-                pos = np.where(col > 0.001)[0]
-                st_bot_z.append(float(hull.waterlines_z[pos[0]]) if len(pos) > 0 else float(hull.D))
+            # Linhas d'água de referência submersas
+            for k, wz in enumerate(zs):
+                if 0 < wz < viz_draft:
+                    fig.add_hline(
+                        y=wz, line_dash="dot", line_color="rgba(59, 130, 246, 0.25)", line_width=1.0,
+                        annotation_text=f"WL {k:02d}", annotation_position="left"
+                    )
 
+            # 2. Perfil Real da Quilha Submersa
+            st_keel_z = get_hull_keel_profile(hull)
             keel_x_dense = np.linspace(x0, x_end, 180)
-            keel_z_dense = np.interp(keel_x_dense, xs, st_bot_z)
+            keel_z_dense = np.interp(keel_x_dense, xs, st_keel_z)
             submersed_keel_z = np.minimum(viz_draft, keel_z_dense)
 
+            # Silhueta da Carena Submersa
             sil_x = np.concatenate([keel_x_dense, [x_end, x0, x0]])
             sil_z = np.concatenate([submersed_keel_z, [viz_draft, viz_draft, submersed_keel_z[0]]])
             fig.add_trace(go.Scatter(
@@ -1859,62 +1902,58 @@ else:
             fig.add_trace(go.Scatter(
                 x=keel_x_dense, y=submersed_keel_z, mode='lines',
                 name="Quilha & Roda de Proa Submersa",
-                line=dict(color="#ffffff", width=2.8)
+                line=dict(color="#ffffff", width=3.0)
             ))
 
-            # 3. Linhas de Fluxo Longitudinais (Abaixo da Linha d'Água no Calado T)
+            # 3. Linhas do Alto Submersas (Cortes Longitudinais Reais CORTADOS no Calado T)
             flow_specs = [
-                {"name": "Linha Longitudinal I (Y = 0.15 B)", "frac": 0.15, "exp_bow": 4.20, "exp_stern": 1.90, "color": "#f43f5e"},
-                {"name": "Linha Longitudinal II (Y = 0.32 B)", "frac": 0.32, "exp_bow": 3.40, "exp_stern": 1.85, "color": "#fb923c"},
-                {"name": "Linha Longitudinal III (Y = 0.50 B)", "frac": 0.50, "exp_bow": 2.70, "exp_stern": 1.80, "color": "#facc15"},
-                {"name": "Linha Longitudinal IV (Y = 0.70 B)", "frac": 0.70, "exp_bow": 2.05, "exp_stern": 1.75, "color": "#22c55e"},
-                {"name": "Linha Longitudinal V (Y = 0.88 B)", "frac": 0.88, "exp_bow": 1.45, "exp_stern": 1.70, "color": "#38bdf8"}
+                {"name": "Linha Longitudinal I (Y = 0.15 B)", "frac": 0.15, "color": "#f43f5e"},
+                {"name": "Linha Longitudinal II (Y = 0.32 B)", "frac": 0.32, "color": "#fb923c"},
+                {"name": "Linha Longitudinal III (Y = 0.50 B)", "frac": 0.50, "color": "#facc15"},
+                {"name": "Linha Longitudinal IV (Y = 0.70 B)", "frac": 0.70, "color": "#22c55e"},
+                {"name": "Linha Longitudinal V (Y = 0.88 B)", "frac": 0.88, "color": "#38bdf8"}
             ]
-            x_mid = float(xs[len(xs) // 2])
-            xs_dense = np.linspace(x0, x_end, 150)
 
             for flow in flow_specs:
                 yc = (hull.B / 2.0) * flow["frac"]
-                col_mid = [hull.get_y(len(xs) // 2, wz) for wz in zs]
-                z_min_raw = float(np.interp(yc, col_mid, zs)) if np.max(col_mid) >= yc else float(viz_draft * (0.10 + 0.65 * flow["frac"]))
-                z_min = min(viz_draft * 0.92, z_min_raw)
+                st_pts_x, st_pts_z = [], []
+                for j, x in enumerate(xs):
+                    col = hull.offsets[:, j]
+                    if np.max(col) >= yc:
+                        z_val = float(np.interp(yc, col, zs))
+                        if z_val <= viz_draft:
+                            st_pts_x.append(float(x))
+                            st_pts_z.append(z_val)
 
-                col_0 = [hull.get_y(0, wz) for wz in zs]
-                z_stern_raw = float(np.interp(yc, col_0, zs)) if np.max(col_0) >= yc else float(min(viz_draft, z_min + 0.25 + 0.30 * flow["frac"]))
-                z_stern = min(viz_draft, max(z_min, z_stern_raw))
-
-                exp_bow = flow["exp_bow"]
-                exp_stern = flow["exp_stern"]
-
-                zs_flow = []
-                for x in xs_dense:
-                    if x >= x_mid:
-                        t = (x - x_mid) / max(1e-5, (x_end - x_mid))
-                        z_val = z_min + (viz_draft - z_min) * (t ** exp_bow)
+                if len(st_pts_x) >= 2:
+                    if len(st_pts_x) >= 3:
+                        try:
+                            pchip_cut = PchipInterpolator(st_pts_x, st_pts_z)
+                            sub_x = np.linspace(st_pts_x[0], st_pts_x[-1], 100)
+                            sub_z = np.minimum(viz_draft, pchip_cut(sub_x))
+                        except Exception:
+                            sub_x, sub_z = st_pts_x, st_pts_z
                     else:
-                        t = (x_mid - x) / max(1e-5, (x_mid - x0))
-                        z_val = z_min + (z_stern - z_min) * (t ** exp_stern)
-                    zs_flow.append(min(viz_draft, z_val))
+                        sub_x, sub_z = st_pts_x, st_pts_z
 
-                zs_flow = np.array(zs_flow)
-                fig.add_trace(go.Scatter(
-                    x=xs_dense, y=zs_flow, mode='lines',
-                    name=flow["name"],
-                    line=dict(color=flow["color"], width=2.6)
-                ))
+                    fig.add_trace(go.Scatter(
+                        x=sub_x, y=sub_z, mode='lines',
+                        name=flow["name"],
+                        line=dict(color=flow["color"], width=2.6)
+                    ))
 
-            # 4. Linha d'Água Ativa no Calado T (Plano Superior da Superfície da Água)
+            # 4. Linha d'Água Ativa no Calado T (Superfície Livre no Calado)
             fig.add_trace(go.Scatter(
                 x=[x0, x_end], y=[viz_draft, viz_draft], mode='lines',
-                name=f"★ Linha d'Água no Calado T = {viz_draft:.2f}m (Linha de Flutuação)",
+                name=f"★ Linha d'Água no Calado T = {viz_draft:.2f}m (Flutuação)",
                 line=dict(color="#00f5d4", width=4.0, dash="solid")
             ))
 
             fig.update_layout(
                 title=f"Linhas d'Água Longitudinais da Carena (Submerso abaixo do Calado T = {viz_draft:.2f}m)",
-                xaxis_title="Comprimento X (m) — PR (Popa) → PV (Proa)",
-                yaxis_title="Altura Z (m) — Linha de Base (LB) = 0",
-                yaxis=dict(range=[-0.04, viz_draft + 0.08]),
+                xaxis_title="Comprimento Longitudinal X (m) — PR (Popa) → PV (Proa)",
+                yaxis_title="Altura Vertical Z (m) — Linha de Base (LB) = 0",
+                yaxis=dict(range=[-0.03, viz_draft + 0.05]),
                 template="plotly_dark", height=460,
                 margin=dict(l=25, r=25, t=45, b=25),
                 legend=dict(orientation="h", yanchor="bottom", y=-0.48, xanchor="center", x=0.5)
